@@ -1,8 +1,0 @@
-[submodule "ballcoin-blockchain-gui"]
-	path = ballcoin-blockchain-gui
-	url = https://github.com/ball-network/ballcoin-blockchain-gui.git
-	branch = main
-[submodule "mozilla-ca"]
-	path = mozilla-ca
-	url = https://github.com/chia-network/mozilla-ca.git
-	branch = main

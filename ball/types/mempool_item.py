@@ -1,17 +1,18 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import List
 
 from ball.consensus.cost_calculator import NPCResult
 from ball.types.blockchain_format.coin import Coin
-from ball.types.blockchain_format.program import SerializedProgram
 from ball.types.blockchain_format.sized_bytes import bytes32
 from ball.types.spend_bundle import SpendBundle
-from ball.util.ints import uint64
+from ball.util.ints import uint32, uint64
 from ball.util.streamable import Streamable, streamable
 
 
-@dataclass(frozen=True)
 @streamable
+@dataclass(frozen=True)
 class MempoolItem(Streamable):
     spend_bundle: SpendBundle
     fee: uint64
@@ -20,9 +21,9 @@ class MempoolItem(Streamable):
     spend_bundle_name: bytes32
     additions: List[Coin]
     removals: List[Coin]
-    program: SerializedProgram
+    height_added_to_mempool: uint32
 
-    def __lt__(self, other):
+    def __lt__(self, other: MempoolItem) -> bool:
         return self.fee_per_cost < other.fee_per_cost
 
     @property

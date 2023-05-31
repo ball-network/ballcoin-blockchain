@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
@@ -16,12 +18,11 @@ Note: When changing this file, also change protocol_message_types.py, and the pr
 """
 
 
-@dataclass(frozen=True)
 @streamable
+@dataclass(frozen=True)
 class NewPeakTimelord(Streamable):
     reward_chain_block: RewardChainBlock
     difficulty: uint64
-    difficulty_coefficient: str
     deficit: uint8
     sub_slot_iters: uint64  # SSi in the slot where NewPeak has been infused
     sub_epoch_summary: Optional[
@@ -30,10 +31,11 @@ class NewPeakTimelord(Streamable):
     previous_reward_challenges: List[Tuple[bytes32, uint128]]
     last_challenge_sb_or_eos_total_iters: uint128
     passes_ses_height_but_not_yet_included: bool
+    difficulty_coefficient: str
 
 
-@dataclass(frozen=True)
 @streamable
+@dataclass(frozen=True)
 class NewUnfinishedBlockTimelord(Streamable):
     reward_chain_block: RewardChainBlockUnfinished  # Reward chain trunk data
     difficulty: uint64
@@ -43,11 +45,11 @@ class NewUnfinishedBlockTimelord(Streamable):
     # This is the last thing infused in the reward chain before this signage point.
     # The challenge that the SP reward chain VDF is based off of, or in the case of sp index 0, the previous infusion
     rc_prev: bytes32
-    difficulty_coefficient: str
+    difficulty_coefficient: str  # staking
 
 
-@dataclass(frozen=True)
 @streamable
+@dataclass(frozen=True)
 class NewInfusionPointVDF(Streamable):
     unfinished_reward_hash: bytes32
     challenge_chain_ip_vdf: VDFInfo
@@ -58,8 +60,8 @@ class NewInfusionPointVDF(Streamable):
     infused_challenge_chain_ip_proof: Optional[VDFProof]
 
 
-@dataclass(frozen=True)
 @streamable
+@dataclass(frozen=True)
 class NewSignagePointVDF(Streamable):
     index_from_challenge: uint8
     challenge_chain_sp_vdf: VDFInfo
@@ -69,14 +71,14 @@ class NewSignagePointVDF(Streamable):
     timelord_fee_puzzle_hash: bytes32
 
 
-@dataclass(frozen=True)
 @streamable
+@dataclass(frozen=True)
 class NewEndOfSubSlotVDF(Streamable):
     end_of_sub_slot_bundle: EndOfSubSlotBundle
 
 
-@dataclass(frozen=True)
 @streamable
+@dataclass(frozen=True)
 class RequestCompactProofOfTime(Streamable):
     new_proof_of_time: VDFInfo
     header_hash: bytes32
@@ -84,8 +86,8 @@ class RequestCompactProofOfTime(Streamable):
     field_vdf: uint8
 
 
-@dataclass(frozen=True)
 @streamable
+@dataclass(frozen=True)
 class RespondCompactProofOfTime(Streamable):
     vdf_info: VDFInfo
     vdf_proof: VDFProof

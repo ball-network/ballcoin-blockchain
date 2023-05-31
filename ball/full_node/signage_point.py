@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Optional
 
@@ -6,8 +8,8 @@ from ball.types.blockchain_format.vdf import VDFInfo, VDFProof
 from ball.util.streamable import Streamable, streamable
 
 
-@dataclass(frozen=True)
 @streamable
+@dataclass(frozen=True)
 class SignagePoint(Streamable):
     cc_vdf: Optional[VDFInfo]
     cc_proof: Optional[VDFProof]

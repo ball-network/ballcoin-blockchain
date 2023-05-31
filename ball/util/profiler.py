@@ -3,10 +3,10 @@ import cProfile
 import logging
 import pathlib
 
-from ball.util.path import mkdir, path_from_root
+from ball.util.path import path_from_root
 
 # to use the profiler, enable it config file, "enable_profiler"
-# the output will be printed to your ball root path, e.g. ~/.sit/mainnet/profile/
+# the output will be printed to your ball root path, e.g. ~/.ball/mainnet/profile/
 # to analyze the profile, run:
 
 #   python ball/utils/profiler.py ~/.ball/mainnet/profile | less -r
@@ -23,7 +23,7 @@ async def profile_task(root_path: pathlib.Path, service: str, log: logging.Logge
 
     profile_dir = path_from_root(root_path, f"profile-{service}")
     log.info("Starting profiler. saving to %s" % profile_dir)
-    mkdir(profile_dir)
+    profile_dir.mkdir(parents=True, exist_ok=True)
 
     counter = 0
 
@@ -77,7 +77,10 @@ if __name__ == "__main__":
 
                     # TODO: to support windows and MacOS, extend this to a list of function known to sleep the process
                     # e.g. WaitForMultipleObjects or kqueue
-                    if "{method 'poll' of 'select.epoll' objects}" in columns[5]:
+                    if (
+                        "{method 'poll' of 'select.epoll' objects}" in columns[5]
+                        or "method 'control' of 'select.kqueue' objects" in columns[5]
+                    ):
                         # cumulative time
                         sleep += float(columns[3])
 

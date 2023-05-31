@@ -1,7 +1,9 @@
 # -*- mode: python ; coding: utf-8 -*-
 import importlib
+import os
 import pathlib
 import platform
+import sysconfig
 
 from pkg_resources import get_distribution
 
@@ -54,6 +56,7 @@ version_data = copy_metadata(get_distribution("ballcoin-blockchain"))[0]
 block_cipher = None
 
 SERVERS = [
+    "data_layer",
     "wallet",
     "full_node",
     "harvester",
@@ -70,11 +73,30 @@ hiddenimports = []
 hiddenimports.extend(entry_points)
 hiddenimports.extend(keyring_imports)
 
-binaries = [
-]
+binaries = []
 
-if not THIS_IS_MAC:
+if os.path.exists(f"{ROOT}/madmax/ball_plot"):
     binaries.extend([
+        (
+            f"{ROOT}/madmax/ball_plot",
+            "madmax"
+        )
+    ])
+
+if os.path.exists(f"{ROOT}/madmax/ball_plot_k34",):
+    binaries.extend([
+        (
+            f"{ROOT}/madmax/ball_plot_k34",
+            "madmax"
+        )
+    ])
+
+if os.path.exists(f"{ROOT}/bladebit/bladebit"):
+    binaries.extend([
+        (
+            f"{ROOT}/bladebit/bladebit",
+            "bladebit"
+        )
     ])
 
 if THIS_IS_WINDOWS:
@@ -86,7 +108,7 @@ if THIS_IS_WINDOWS:
 
 if THIS_IS_WINDOWS:
     ball_mod = importlib.import_module("ball")
-    dll_paths = ROOT / "*.dll"
+    dll_paths = pathlib.Path(sysconfig.get_path("platlib")) / "*.dll"
 
     binaries = [
         (
@@ -164,6 +186,10 @@ add_binary("daemon", f"{ROOT}/ball/daemon/server.py", COLLECT_ARGS)
 
 for server in SERVERS:
     add_binary(f"start_{server}", f"{ROOT}/ball/server/start_{server}.py", COLLECT_ARGS)
+
+add_binary("start_crawler", f"{ROOT}/ball/seeder/start_crawler.py", COLLECT_ARGS)
+add_binary("start_seeder", f"{ROOT}/ball/seeder/dns_server.py", COLLECT_ARGS)
+add_binary("start_data_layer_http", f"{ROOT}/ball/data_layer/data_layer_server.py", COLLECT_ARGS)
 
 COLLECT_KWARGS = dict(
     strip=False,

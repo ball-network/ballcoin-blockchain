@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from decimal import Decimal
 from typing import Dict, List, Optional
 
@@ -10,11 +12,13 @@ from ball.types.blockchain_format.vdf import VDFInfo
 from ball.types.header_block import HeaderBlock
 from ball.types.weight_proof import SubEpochChallengeSegment
 from ball.util.ints import uint32
-from ball.util.network import asyncio_run
 
 
 class BlockchainInterface:
-    def get_peak(self) -> Optional[BlockRecord]:
+    def del_peak(self) -> Optional[BlockRecord]:
+        pass
+
+    def del_coefficient(self, height: uint32):
         pass
 
     def get_peak_height(self) -> Optional[uint32]:
@@ -38,16 +42,16 @@ class BlockchainInterface:
     def contains_block(self, header_hash: bytes32) -> bool:
         pass
 
-    def remove_block_record(self, header_hash: bytes32):
+    def remove_block_record(self, header_hash: bytes32) -> None:
         pass
 
-    def add_block_record(self, block_record: BlockRecord):
+    def add_block_record(self, block_record: BlockRecord) -> None:
         pass
 
     def contains_height(self, height: uint32) -> bool:
         pass
 
-    async def warmup(self, fork_point: uint32):
+    async def warmup(self, fork_point: uint32) -> None:
         pass
 
     async def get_block_record_from_db(self, header_hash: bytes32) -> Optional[BlockRecord]:
@@ -75,25 +79,21 @@ class BlockchainInterface:
         return None
 
     async def persist_sub_epoch_challenge_segments(
-        self, sub_epoch_summary_height: uint32, segments: List[SubEpochChallengeSegment]
-    ):
+        self, sub_epoch_summary_hash: bytes32, segments: List[SubEpochChallengeSegment]
+    ) -> None:
         pass
 
     async def get_sub_epoch_challenge_segments(
         self,
-        sub_epoch_summary_height: uint32,
+        sub_epoch_summary_hash: bytes32,
     ) -> Optional[List[SubEpochChallengeSegment]]:
         pass
 
     def seen_compact_proofs(self, vdf_info: VDFInfo, height: uint32) -> bool:
         pass
 
+    # staking
     async def get_farmer_difficulty_coefficient(
         self, farmer_public_key: G1Element, height: Optional[uint32] = None
     ) -> Decimal:
         raise NotImplementedError("get_farmer_difficulty_coefficient not implemented")
-
-    def get_farmer_difficulty_coefficient_sync(
-        self, farmer_public_key: G1Element, height: Optional[uint32] = None
-    ) -> Decimal:
-        return asyncio_run(self.get_farmer_difficulty_coefficient(farmer_public_key, height))

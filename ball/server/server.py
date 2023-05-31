@@ -1,25 +1,34 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import ssl
 import time
 import traceback
 from collections import Counter
-from ipaddress import IPv6Address, ip_address, ip_network, IPv4Network, IPv6Network
+from ipaddress import IPv4Network, IPv6Address, IPv6Network, ip_address, ip_network
 from pathlib import Path
 from secrets import token_bytes
-from typing import Any, Callable, Dict, List, Optional, Union, Set, Tuple
+from typing import Any, Callable
 from typing import Counter as typing_Counter
+from typing import Dict, List, Optional, Set, Tuple, Union
 
-from aiohttp import ClientSession, ClientTimeout, ServerDisconnectedError, WSCloseCode, client_exceptions, web
-from aiohttp.web_app import Application
-from aiohttp.web_runner import TCPSite
+from aiohttp import (
+    ClientResponseError,
+    ClientSession,
+    ClientTimeout,
+    ServerDisconnectedError,
+    WSCloseCode,
+    client_exceptions,
+    web,
+)
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, serialization
 
 from ball.protocols.protocol_message_types import ProtocolMessageTypes
 from ball.protocols.protocol_state_machine import message_requires_reply
-from ball.protocols.protocol_timing import INVALID_PROTOCOL_BAN_SECONDS, API_EXCEPTION_BAN_SECONDS
+from ball.protocols.protocol_timing import API_EXCEPTION_BAN_SECONDS, INVALID_PROTOCOL_BAN_SECONDS
 from ball.protocols.shared_protocol import protocol_version
 from ball.server.introducer_peers import IntroducerPeers
 from ball.server.outbound_message import Message, NodeType
@@ -27,10 +36,13 @@ from ball.server.ssl_context import private_ssl_paths, public_ssl_paths
 from ball.server.ws_connection import WSBallConnection
 from ball.types.blockchain_format.sized_bytes import bytes32
 from ball.types.peer_info import PeerInfo
+from ball.util.api_decorators import get_metadata
 from ball.util.errors import Err, ProtocolError
 from ball.util.ints import uint16
-from ball.util.network import is_localhost, is_in_network
+from ball.util.network import WebServer, is_in_network, is_localhost
 from ball.util.ssl_check import verify_ssl_certs_and_keys
+
+max_message_size = 50 * 1024 * 1024  # 50MB
 
 
 def ssl_context_for_server(
@@ -41,12 +53,27 @@ def ssl_context_for_server(
     *,
     check_permissions: bool = True,
     log: Optional[logging.Logger] = None,
-) -> Optional[ssl.SSLContext]:
+) -> ssl.SSLContext:
     if check_permissions:
         verify_ssl_certs_and_keys([ca_cert, private_cert_path], [ca_key, private_key_path], log)
 
-    ssl_context = ssl._create_unverified_context(purpose=ssl.Purpose.SERVER_AUTH, cafile=str(ca_cert))
+    ssl_context = ssl._create_unverified_context(purpose=ssl.Purpose.CLIENT_AUTH, cafile=str(ca_cert))
     ssl_context.check_hostname = False
+    ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
+    ssl_context.set_ciphers(
+        (
+            "ECDHE-ECDSA-AES256-GCM-SHA384:"
+            "ECDHE-RSA-AES256-GCM-SHA384:"
+            "ECDHE-ECDSA-CHACHA20-POLY1305:"
+            "ECDHE-RSA-CHACHA20-POLY1305:"
+            "ECDHE-ECDSA-AES128-GCM-SHA256:"
+            "ECDHE-RSA-AES128-GCM-SHA256:"
+            "ECDHE-ECDSA-AES256-SHA384:"
+            "ECDHE-RSA-AES256-SHA384:"
+            "ECDHE-ECDSA-AES128-SHA256:"
+            "ECDHE-RSA-AES128-SHA256"
+        )
+    )
     ssl_context.load_cert_chain(certfile=str(private_cert_path), keyfile=str(private_key_path))
     ssl_context.verify_mode = ssl.CERT_REQUIRED
     return ssl_context
@@ -54,7 +81,7 @@ def ssl_context_for_server(
 
 def ssl_context_for_root(
     ca_cert_file: str, *, check_permissions: bool = True, log: Optional[logging.Logger] = None
-) -> Optional[ssl.SSLContext]:
+) -> ssl.SSLContext:
     if check_permissions:
         verify_ssl_certs_and_keys([Path(ca_cert_file)], [], log)
 
@@ -70,7 +97,7 @@ def ssl_context_for_client(
     *,
     check_permissions: bool = True,
     log: Optional[logging.Logger] = None,
-) -> Optional[ssl.SSLContext]:
+) -> ssl.SSLContext:
     if check_permissions:
         verify_ssl_certs_and_keys([ca_cert, private_cert_path], [ca_key, private_key_path], log)
 
@@ -79,6 +106,13 @@ def ssl_context_for_client(
     ssl_context.load_cert_chain(certfile=str(private_cert_path), keyfile=str(private_key_path))
     ssl_context.verify_mode = ssl.CERT_REQUIRED
     return ssl_context
+
+
+def calculate_node_id(cert_path: Path) -> bytes32:
+    pem_cert = x509.load_pem_x509_certificate(cert_path.read_bytes(), default_backend())
+    der_cert_bytes = pem_cert.public_bytes(encoding=serialization.Encoding.DER)
+    der_cert = x509.load_der_x509_certificate(der_cert_bytes, default_backend())
+    return bytes32(der_cert.fingerprint(hashes.SHA256()))
 
 
 class BallServer:
@@ -92,39 +126,26 @@ class BallServer:
         network_id: str,
         inbound_rate_limit_percent: int,
         outbound_rate_limit_percent: int,
+        capabilities: List[Tuple[uint16, str]],
         root_path: Path,
         config: Dict,
         private_ca_crt_key: Tuple[Path, Path],
         ball_ca_crt_key: Tuple[Path, Path],
         name: str = None,
-        introducer_peers: Optional[IntroducerPeers] = None,
     ):
         # Keeps track of all connections to and from this node.
-        logging.basicConfig(level=logging.DEBUG)
         self.all_connections: Dict[bytes32, WSBallConnection] = {}
-        self.tasks: Set[asyncio.Task] = set()
-
-        self.connection_by_type: Dict[NodeType, Dict[bytes32, WSBallConnection]] = {
-            NodeType.FULL_NODE: {},
-            NodeType.WALLET: {},
-            NodeType.HARVESTER: {},
-            NodeType.FARMER: {},
-            NodeType.TIMELORD: {},
-            NodeType.INTRODUCER: {},
-        }
 
         self._port = port  # TCP port to identify our node
         self._local_type: NodeType = local_type
-
+        self._local_capabilities_for_handshake = capabilities
         self._ping_interval = ping_interval
         self._network_id = network_id
         self._inbound_rate_limit_percent = inbound_rate_limit_percent
         self._outbound_rate_limit_percent = outbound_rate_limit_percent
 
-        # Task list to keep references to tasks, so they don't get GCd
-        self._tasks: List[asyncio.Task] = []
-
         self.log = logging.getLogger(name if name else __name__)
+        self.log.info("Service capabilities: %s", self._local_capabilities_for_handshake)
 
         # Our unique random node id that we will send to other peers, regenerated on launch
         self.api = api
@@ -138,25 +159,53 @@ class BallServer:
         if self._local_type is NodeType.INTRODUCER:
             self.introducer_peers = IntroducerPeers()
 
-        if self._local_type is not NodeType.INTRODUCER:
-            self._private_cert_path, self._private_key_path = private_ssl_paths(root_path, config)
-        if self._local_type is not NodeType.HARVESTER:
-            self.p2p_crt_path, self.p2p_key_path = public_ssl_paths(root_path, config)
-        else:
-            self.p2p_crt_path, self.p2p_key_path = None, None
-        self.ca_private_crt_path, self.ca_private_key_path = private_ca_crt_key
-        self.ball_ca_crt_path, self.ball_ca_key_path = ball_ca_crt_key
-        self.node_id = self.my_id()
+        ca_private_crt_path, ca_private_key_path = private_ca_crt_key
+        ball_ca_crt_path, ball_ca_key_path = ball_ca_crt_key
 
-        self.incoming_task = asyncio.create_task(self.incoming_api_task())
-        self.gc_task: asyncio.Task = asyncio.create_task(self.garbage_collect_connections_task())
-        self.app: Optional[Application] = None
-        self.runner: Optional[web.AppRunner] = None
-        self.site: Optional[TCPSite] = None
+        private_cert_path, private_key_path = None, None
+        public_cert_path, public_key_path = None, None
+
+        authenticated_client_types = {NodeType.HARVESTER}
+        authenticated_server_types = {NodeType.HARVESTER, NodeType.FARMER, NodeType.WALLET, NodeType.DATA_LAYER}
+
+        if self._local_type in authenticated_client_types:
+            # Authenticated clients
+            private_cert_path, private_key_path = private_ssl_paths(root_path, config)
+            self.ssl_client_context = ssl_context_for_client(
+                ca_private_crt_path, ca_private_key_path, private_cert_path, private_key_path
+            )
+        else:
+            # Public clients
+            public_cert_path, public_key_path = public_ssl_paths(root_path, config)
+            self.ssl_client_context = ssl_context_for_client(
+                ball_ca_crt_path, ball_ca_key_path, public_cert_path, public_key_path
+            )
+
+        if self._local_type in authenticated_server_types:
+            # Authenticated servers
+            private_cert_path, private_key_path = private_ssl_paths(root_path, config)
+            self.ssl_context = ssl_context_for_server(
+                ca_private_crt_path,
+                ca_private_key_path,
+                private_cert_path,
+                private_key_path,
+                log=self.log,
+            )
+        else:
+            # Public servers
+            public_cert_path, public_key_path = public_ssl_paths(root_path, config)
+            self.ssl_context = ssl_context_for_server(
+                ball_ca_crt_path, ball_ca_key_path, public_cert_path, public_key_path, log=self.log
+            )
+
+        # If node has public cert use that one for id, if not use private.
+        self.node_id = calculate_node_id(private_cert_path if public_cert_path is None else public_cert_path)
+
+        self.incoming_task: Optional[asyncio.Task] = None
+        self.gc_task: Optional[asyncio.Task] = None
+        self.webserver: Optional[WebServer] = None
 
         self.connection_close_task: Optional[asyncio.Task] = None
-        self.site_shutdown_task: Optional[asyncio.Task] = None
-        self.app_shut_down_task: Optional[asyncio.Task] = None
         self.received_message_callback: Optional[Callable] = None
         self.api_tasks: Dict[bytes32, asyncio.Task] = {}
         self.execute_tasks: Set[bytes32] = set()
@@ -169,16 +218,6 @@ class BallServer:
             ip_network(net, strict=False) for net in config.get("exempt_peer_networks", [])
         ]
 
-    def my_id(self) -> bytes32:
-        """If node has public cert use that one for id, if not use private."""
-        if self.p2p_crt_path is not None:
-            pem_cert = x509.load_pem_x509_certificate(self.p2p_crt_path.read_bytes(), default_backend())
-        else:
-            pem_cert = x509.load_pem_x509_certificate(self._private_cert_path.read_bytes(), default_backend())
-        der_cert_bytes = pem_cert.public_bytes(encoding=serialization.Encoding.DER)
-        der_cert = x509.load_der_x509_certificate(der_cert_bytes, default_backend())
-        return bytes32(der_cert.fingerprint(hashes.SHA256()))
-
     def set_received_message_callback(self, callback: Callable):
         self.received_message_callback = callback
 
@@ -187,13 +226,20 @@ class BallServer:
         Periodically checks for connections with no activity (have not sent us any data), and removes them,
         to allow room for other peers.
         """
+        is_crawler = getattr(self.node, "crawl", None)
         while True:
-            await asyncio.sleep(600)
+            await asyncio.sleep(600 if is_crawler is None else 2)
             to_remove: List[WSBallConnection] = []
             for connection in self.all_connections.values():
-                if self._local_type == NodeType.FULL_NODE and connection.connection_type == NodeType.FULL_NODE:
-                    if time.time() - connection.last_message_time > 1800:
-                        to_remove.append(connection)
+                if (
+                    self._local_type == NodeType.FULL_NODE or self._local_type == NodeType.WALLET
+                ) and connection.connection_type == NodeType.FULL_NODE:
+                    if is_crawler is not None:
+                        if time.time() - connection.creation_time > 5:
+                            to_remove.append(connection)
+                    else:
+                        if time.time() - connection.last_message_time > 1800:
+                            to_remove.append(connection)
             for connection in to_remove:
                 self.log.debug(f"Garbage collecting connection {connection.peer_host} due to inactivity")
                 await connection.close()
@@ -206,50 +252,45 @@ class BallServer:
             for peer_ip in to_remove_ban:
                 del self.banned_peers[peer_ip]
 
-    async def start_server(self, on_connect: Callable = None):
+    async def start_server(self, prefer_ipv6: bool, on_connect: Callable = None):
+        if self.webserver is not None:
+            raise RuntimeError("BallServer already started")
+        if self.incoming_task is None:
+            self.incoming_task = asyncio.create_task(self.incoming_api_task())
+        if self.gc_task is None:
+            self.gc_task = asyncio.create_task(self.garbage_collect_connections_task())
+
         if self._local_type in [NodeType.WALLET, NodeType.HARVESTER, NodeType.TIMELORD]:
             return None
 
-        self.app = web.Application()
         self.on_connect = on_connect
-        routes = [
-            web.get("/ws", self.incoming_connection),
-        ]
-        self.app.add_routes(routes)
-        self.runner = web.AppRunner(self.app, access_log=None, logger=self.log)
-        await self.runner.setup()
-        authenticate = self._local_type not in (NodeType.FULL_NODE, NodeType.INTRODUCER)
-        if authenticate:
-            ssl_context = ssl_context_for_server(
-                self.ca_private_crt_path,
-                self.ca_private_key_path,
-                self._private_cert_path,
-                self._private_key_path,
-                log=self.log,
-            )
-        else:
-            self.p2p_crt_path, self.p2p_key_path = public_ssl_paths(self.root_path, self.config)
-            ssl_context = ssl_context_for_server(
-                self.ball_ca_crt_path, self.ball_ca_key_path, self.p2p_crt_path, self.p2p_key_path, log=self.log
-            )
-
-        self.site = web.TCPSite(
-            self.runner,
-            port=self._port,
-            shutdown_timeout=3,
-            ssl_context=ssl_context,
+        self.webserver = await WebServer.create(
+            hostname="",
+            port=uint16(self._port),
+            routes=[web.get("/ws", self.incoming_connection)],
+            ssl_context=self.ssl_context,
+            prefer_ipv6=prefer_ipv6,
+            logger=self.log,
         )
-        await self.site.start()
+        self._port = int(self.webserver.listen_port)
         self.log.info(f"Started listening on port: {self._port}")
 
     async def incoming_connection(self, request):
+        if getattr(self.node, "crawl", None) is not None:
+            return
+
         if request.remote in self.banned_peers and time.time() < self.banned_peers[request.remote]:
             self.log.warning(f"Peer {request.remote} is banned, refusing connection")
             return None
-        ws = web.WebSocketResponse(max_msg_size=50 * 1024 * 1024)
+        ws = web.WebSocketResponse(max_msg_size=max_message_size)
         await ws.prepare(request)
         close_event = asyncio.Event()
-        cert_bytes = request.transport._ssl_protocol._extra["ssl_object"].getpeercert(True)
+        ssl_object = request.get_extra_info("ssl_object")
+        if ssl_object is None:
+            reason = f"ssl_object is None for request {request}"
+            self.log.warning(reason)
+            raise web.HTTPInternalServerError(reason=reason)
+        cert_bytes = ssl_object.getpeercert(True)
         der_cert = x509.load_der_x509_certificate(cert_bytes)
         peer_id = bytes32(der_cert.fingerprint(hashes.SHA256()))
         if peer_id == self.node_id:
@@ -269,16 +310,11 @@ class BallServer:
                 peer_id,
                 self._inbound_rate_limit_percent,
                 self._outbound_rate_limit_percent,
+                self._local_capabilities_for_handshake,
                 close_event,
             )
-            handshake = await connection.perform_handshake(
-                self._network_id,
-                protocol_version,
-                self._port,
-                self._local_type,
-            )
+            await connection.perform_handshake(self._network_id, protocol_version, self._port, self._local_type)
 
-            assert handshake is True
             # Limit inbound connections to config's specifications.
             if not self.accept_inbound_connections(connection.connection_type) and not is_in_network(
                 connection.peer_host, self.exempt_peer_networks
@@ -330,7 +366,6 @@ class BallServer:
             await con.close()
         self.all_connections[connection.peer_node_id] = connection
         if connection.connection_type is not None:
-            self.connection_by_type[connection.connection_type][connection.peer_node_id] = connection
             if on_connect is not None:
                 await on_connect(connection)
         else:
@@ -351,7 +386,6 @@ class BallServer:
         self,
         target_node: PeerInfo,
         on_connect: Callable = None,
-        auth: bool = False,
         is_feeler: bool = False,
     ) -> bool:
         """
@@ -365,21 +399,11 @@ class BallServer:
             self.log.warning(f"Peer {target_node.host} is still banned, not connecting to it")
             return False
 
-        if auth:
-            ssl_context = ssl_context_for_client(
-                self.ca_private_crt_path, self.ca_private_key_path, self._private_cert_path, self._private_key_path
-            )
-        else:
-            ssl_context = ssl_context_for_client(
-                self.ball_ca_crt_path, self.ball_ca_key_path, self.p2p_crt_path, self.p2p_key_path
-            )
         session = None
         connection: Optional[WSBallConnection] = None
         try:
             # Crawler/DNS introducer usually uses a lower timeout than the default
-            timeout_value = (
-                30 if "peer_connect_timeout" not in self.config else float(self.config["peer_connect_timeout"])
-            )
+            timeout_value = float(self.config.get("peer_connect_timeout", 30))
             timeout = ClientTimeout(total=timeout_value)
             session = ClientSession(timeout=timeout)
 
@@ -393,10 +417,18 @@ class BallServer:
             self.log.debug(f"Connecting: {url}, Peer info: {target_node}")
             try:
                 ws = await session.ws_connect(
-                    url, autoclose=True, autoping=True, heartbeat=60, ssl=ssl_context, max_msg_size=50 * 1024 * 1024
+                    url,
+                    autoclose=True,
+                    autoping=True,
+                    heartbeat=60,
+                    ssl=self.ssl_client_context,
+                    max_msg_size=max_message_size,
                 )
             except ServerDisconnectedError:
                 self.log.debug(f"Server disconnected error connecting to {url}. Perhaps we are banned by the peer.")
+                return False
+            except ClientResponseError as e:
+                self.log.warning(f"Connection failed to {url}. Error: {e}")
                 return False
             except asyncio.TimeoutError:
                 self.log.debug(f"Timeout error connecting to {url}")
@@ -404,9 +436,10 @@ class BallServer:
             if ws is None:
                 return False
 
-            assert ws._response.connection is not None and ws._response.connection.transport is not None
-            transport = ws._response.connection.transport  # type: ignore
-            cert_bytes = transport._ssl_protocol._extra["ssl_object"].getpeercert(True)  # type: ignore
+            ssl_object = ws.get_extra_info("ssl_object")
+            if ssl_object is None:
+                raise ValueError(f"ssl_object is None for {ws}")
+            cert_bytes = ssl_object.getpeercert(True)
             der_cert = x509.load_der_x509_certificate(cert_bytes, default_backend())
             peer_id = bytes32(der_cert.fingerprint(hashes.SHA256()))
             if peer_id == self.node_id:
@@ -425,15 +458,10 @@ class BallServer:
                 peer_id,
                 self._inbound_rate_limit_percent,
                 self._outbound_rate_limit_percent,
+                self._local_capabilities_for_handshake,
                 session=session,
             )
-            handshake = await connection.perform_handshake(
-                self._network_id,
-                protocol_version,
-                self._port,
-                self._local_type,
-            )
-            assert handshake is True
+            await connection.perform_handshake(self._network_id, protocol_version, self._port, self._local_type)
             await self.connection_added(connection, on_connect)
             # the session has been adopted by the connection, don't close it at
             # the end of the function
@@ -486,11 +514,8 @@ class BallServer:
 
         if connection.peer_node_id in self.all_connections:
             self.all_connections.pop(connection.peer_node_id)
-        if connection.connection_type is not None:
-            if connection.peer_node_id in self.connection_by_type[connection.connection_type]:
-                self.connection_by_type[connection.connection_type].pop(connection.peer_node_id)
-        else:
-            # This means the handshake was enver finished with this peer
+        if connection.connection_type is None:
+            # This means the handshake was never finished with this peer
             self.log.debug(
                 f"Invalid connection type for connection {connection.peer_host},"
                 f" while closing. Handshake never finished."
@@ -512,7 +537,6 @@ class BallServer:
             task.cancel()
 
     async def incoming_api_task(self) -> None:
-        self.tasks = set()
         message_types: typing_Counter[str] = Counter()  # Used for debugging information.
         while True:
             payload_inc, connection_inc = await self.incoming_messages.get()
@@ -541,7 +565,8 @@ class BallServer:
                         self.log.error(f"Non existing function: {message_type}")
                         raise ProtocolError(Err.INVALID_PROTOCOL_MESSAGE, [message_type])
 
-                    if not hasattr(f, "api_function"):
+                    metadata = get_metadata(function=f)
+                    if not metadata.api_function:
                         self.log.error(f"Peer trying to call non api function {message_type}")
                         raise ProtocolError(Err.INVALID_PROTOCOL_MESSAGE, [message_type])
 
@@ -551,12 +576,12 @@ class BallServer:
                             return None
 
                     timeout: Optional[int] = 600
-                    if hasattr(f, "execute_task"):
+                    if metadata.execute_task:
                         # Don't timeout on methods with execute_task decorator, these need to run fully
                         self.execute_tasks.add(task_id)
                         timeout = None
 
-                    if hasattr(f, "peer_required"):
+                    if metadata.peer_required:
                         coroutine = f(full_message.data, connection)
                     else:
                         coroutine = f(full_message.data)
@@ -570,7 +595,7 @@ class BallServer:
                         except Exception as e:
                             tb = traceback.format_exc()
                             connection.log.error(f"Exception: {e}, {connection.get_peer_logging()}. {tb}")
-                            raise e
+                            raise
                         return None
 
                     response: Optional[Message] = await asyncio.wait_for(wrapped_coroutine(), timeout=timeout)
@@ -581,7 +606,7 @@ class BallServer:
 
                     if response is not None:
                         response_message = Message(response.type, full_message.id, response.data)
-                        await connection.reply_to_request(response_message)
+                        await connection.send_message(response_message)
                 except TimeoutError:
                     connection.log.error(f"Timeout error for: {message_type}")
                 except Exception as e:
@@ -603,7 +628,7 @@ class BallServer:
                     if task_id in self.execute_tasks:
                         self.execute_tasks.remove(task_id)
 
-            task_id = token_bytes()
+            task_id: bytes32 = bytes32(token_bytes(32))
             api_task = asyncio.create_task(api_call(payload_inc, connection_inc, task_id))
             self.api_tasks[task_id] = api_task
             if connection_inc.peer_node_id not in self.tasks_from_peer:
@@ -667,14 +692,11 @@ class BallServer:
 
     def get_full_node_outgoing_connections(self) -> List[WSBallConnection]:
         result = []
-        connections = self.get_full_node_connections()
+        connections = self.get_connections(NodeType.FULL_NODE)
         for connection in connections:
             if connection.is_outbound:
                 result.append(connection)
         return result
-
-    def get_full_node_connections(self) -> List[WSBallConnection]:
-        return list(self.connection_by_type[NodeType.FULL_NODE].values())
 
     def get_connections(self, node_type: Optional[NodeType] = None) -> List[WSBallConnection]:
         result = []
@@ -695,26 +717,27 @@ class BallServer:
 
     def close_all(self) -> None:
         self.connection_close_task = asyncio.create_task(self.close_all_connections())
-        if self.runner is not None:
-            self.site_shutdown_task = asyncio.create_task(self.runner.cleanup())
-        if self.app is not None:
-            self.app_shut_down_task = asyncio.create_task(self.app.shutdown())
+        if self.webserver is not None:
+            self.webserver.close()
         for task_id, task in self.api_tasks.items():
             task.cancel()
 
         self.shut_down_event.set()
-        self.incoming_task.cancel()
-        self.gc_task.cancel()
+        if self.incoming_task is not None:
+            self.incoming_task.cancel()
+            self.incoming_task = None
+        if self.gc_task is not None:
+            self.gc_task.cancel()
+            self.gc_task = None
 
     async def await_closed(self) -> None:
         self.log.debug("Await Closed")
         await self.shut_down_event.wait()
         if self.connection_close_task is not None:
             await self.connection_close_task
-        if self.app_shut_down_task is not None:
-            await self.app_shut_down_task
-        if self.site_shutdown_task is not None:
-            await self.site_shutdown_task
+        if self.webserver is not None:
+            await self.webserver.await_closed()
+            self.webserver = None
 
     async def get_peer_info(self) -> Optional[PeerInfo]:
         ip = None
@@ -724,7 +747,7 @@ class BallServer:
         try:
             timeout = ClientTimeout(total=15)
             async with ClientSession(timeout=timeout) as session:
-                async with session.get("https://ip.chia.net/") as resp:
+                async with session.get("https://checkip.amazonaws.com/") as resp:
                     if resp.status == 200:
                         ip = str(await resp.text())
                         ip = ip.rstrip()
@@ -736,7 +759,7 @@ class BallServer:
             try:
                 timeout = ClientTimeout(total=15)
                 async with ClientSession(timeout=timeout) as session:
-                    async with session.get("https://checkip.amazonaws.com/") as resp:
+                    async with session.get("https://ip.chia.net/") as resp:
                         if resp.status == 200:
                             ip = str(await resp.text())
                             ip = ip.rstrip()
@@ -749,10 +772,13 @@ class BallServer:
             return None
         return peer
 
+    def get_port(self) -> uint16:
+        return uint16(self._port)
+
     def accept_inbound_connections(self, node_type: NodeType) -> bool:
         if not self._local_type == NodeType.FULL_NODE:
             return True
-        inbound_count = len([conn for _, conn in self.connection_by_type[node_type].items() if not conn.is_outbound])
+        inbound_count = len([conn for conn in self.get_connections(node_type) if not conn.is_outbound])
         if node_type == NodeType.FULL_NODE:
             return inbound_count < self.config["target_peer_count"] - self.config["target_outbound_peer_count"]
         if node_type == NodeType.WALLET:
@@ -766,13 +792,9 @@ class BallServer:
     def is_trusted_peer(self, peer: WSBallConnection, trusted_peers: Dict) -> bool:
         if trusted_peers is None:
             return False
-        for trusted_peer in trusted_peers:
-            cert = self.root_path / trusted_peers[trusted_peer]
-            pem_cert = x509.load_pem_x509_certificate(cert.read_bytes())
-            cert_bytes = pem_cert.public_bytes(encoding=serialization.Encoding.DER)
-            der_cert = x509.load_der_x509_certificate(cert_bytes)
-            peer_id = bytes32(der_cert.fingerprint(hashes.SHA256()))
-            if peer_id == peer.peer_node_id:
-                self.log.debug(f"trusted node {peer.peer_node_id} {peer.peer_host}")
-                return True
-        return False
+        if not self.config["testing"] and peer.peer_host == "127.0.0.1":
+            return True
+        if peer.peer_node_id.hex() not in trusted_peers:
+            return False
+
+        return True

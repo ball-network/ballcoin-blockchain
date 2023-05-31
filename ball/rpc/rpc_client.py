@@ -13,7 +13,7 @@ from ball.util.ints import uint16
 
 class RpcClient:
     """
-    Client to Silicoin RPC, connects to a local service. Uses HTTP/JSON, and converts back from
+    Client to Ball RPC, connects to a local service. Uses HTTP/JSON, and converts back from
     JSON into native python objects before returning. All api calls use POST requests.
     Note that this is not the same as the peer protocol, or wallet protocol (which run Ball's
     protocol on top of TCP), it's a separate protocol on top of HTTP that provides easy access
@@ -67,9 +67,12 @@ class RpcClient:
     async def stop_node(self) -> Dict:
         return await self.fetch("stop_node", {})
 
-    def close(self):
+    async def healthz(self) -> Dict:
+        return await self.fetch("healthz", {})
+
+    def close(self) -> None:
         self.closing_task = asyncio.create_task(self.session.close())
 
-    async def await_closed(self):
+    async def await_closed(self) -> None:
         if self.closing_task is not None:
             await self.closing_task
