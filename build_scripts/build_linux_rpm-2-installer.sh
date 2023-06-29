@@ -47,7 +47,7 @@ CLI_RPM_BASE="ballcoin-blockchain-cli-$BALL_INSTALLER_VERSION-1.$REDHAT_PLATFORM
 mkdir -p "dist/$CLI_RPM_BASE/opt/ball"
 mkdir -p "dist/$CLI_RPM_BASE/usr/bin"
 cp -r dist/daemon/* "dist/$CLI_RPM_BASE/opt/ball/"
-ln -s ../../opt/ball/ballcoin "dist/$CLI_RPM_BASE/usr/bin/ball"
+ln -s ../../opt/ball/ball "dist/$CLI_RPM_BASE/usr/bin/ball"
 # This is built into the base build image
 # shellcheck disable=SC1091
 . /etc/profile.d/rvm.sh
@@ -83,10 +83,12 @@ if [ "$REDHAT_PLATFORM" = "arm64" ]; then
 fi
 PRODUCT_NAME="ball"
 echo electron-builder build --linux rpm "${OPT_ARCH}" \
-  --config.productName="${PRODUCT_NAME}" --config.linux.desktop.Name="Ball Blockchain" \
+  --config.extraMetadata.name=ballcoin-blockchain \
+  --config.productName="${PRODUCT_NAME}" --config.linux.desktop.Name="BallCoin Blockchain" \
   --config.rpm.packageName="ballcoin-blockchain"
 electron-builder build --linux rpm "${OPT_ARCH}" \
-  --config.productName="${PRODUCT_NAME}" --config.linux.desktop.Name="Ball Blockchain" \
+  --config.extraMetadata.name=ballcoin-blockchain \
+  --config.productName="${PRODUCT_NAME}" --config.linux.desktop.Name="BallCoin Blockchain" \
   --config.rpm.packageName="ballcoin-blockchain"
 LAST_EXIT_CODE=$?
 ls -l dist/linux*-unpacked/resources

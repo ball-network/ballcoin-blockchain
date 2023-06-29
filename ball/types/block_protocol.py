@@ -4,7 +4,7 @@ from typing import List, Optional
 
 from typing_extensions import Protocol
 
-from ball.types.blockchain_format.program import SerializedProgram
+from ball.types.blockchain_format.serialized_program import SerializedProgram
 from ball.types.blockchain_format.sized_bytes import bytes32
 from ball.util.ints import uint32
 

@@ -6,13 +6,13 @@ self_hostname: &self_hostname "localhost"
 prefer_ipv6: False
 daemon_port: 38881
 daemon_max_message_size: 50000000 # maximum size of RPC message in bytes
+daemon_heartbeat: 300 # sets the heartbeat for ping/ping interval and timeouts
 inbound_rate_limit_percent: 100
 outbound_rate_limit_percent: 30
 
 network_overrides: &network_overrides
   constants:
     mainnet:
-      DIFFICULTY_STARTING: 3
       GENESIS_CHALLENGE: 12bf2c399d95878363839d030269f18a37111e185a1168f0b3706992600143ff
       GENESIS_PRE_FARM_POOL_PUZZLE_HASH: "71ac79ef0f49caec3505153818ab40091c22afe5643e8105c655e0f38f43410c"
       GENESIS_PRE_FARM_FARMER_PUZZLE_HASH: "71ac79ef0f49caec3505153818ab40091c22afe5643e8105c655e0f38f43410c"
@@ -35,7 +35,7 @@ network_overrides: &network_overrides
       default_full_node_port: 38988
 
 selected_network: &selected_network "mainnet"
-ALERTS_URL: https://ballcoin.top/notify/mainnet_alert.txt
+ALERTS_URL: https://download.ballcoin.top/notify/mainnet_alert.txt
 BALL_ALERTS_PUBKEY: 89b7fd87cb56e926ecefb879a29aae308be01f31980569f6a75a69d2a9a69daefd71fb778d865f7c50d6c967e3025937
 
 # public ssl ca is included in source code
@@ -48,23 +48,21 @@ ball_ssl_ca:
   crt: "config/ssl/ca/ball_ca.crt"
   key: "config/ssl/ca/ball_ca.key"
 
-
 daemon_ssl:
   private_crt: "config/ssl/daemon/private_daemon.crt"
   private_key: "config/ssl/daemon/private_daemon.key"
 
-
 # Controls logging of all servers (harvester, farmer, etc..). Each one can be overridden.
 logging: &logging
-  log_stdout: False  # If True, outputs to stdout instead of a file
+  log_stdout: False # If True, outputs to stdout instead of a file
   log_filename: "log/debug.log"
-  log_level: "WARNING"  # Can be CRITICAL, ERROR, WARNING, INFO, DEBUG, NOTSET
+  log_level: "WARNING" # Can be CRITICAL, ERROR, WARNING, INFO, DEBUG, NOTSET
   log_maxfilesrotation: 7 #  Max files in rotation. Default value 7 if the key is not set
   log_maxbytesrotation: 52428800 #  Max bytes logged before rotating logs
   log_use_gzip: False #  Use gzip to compress rotated logs
-  log_syslog: False  # If True, outputs to SysLog host and port specified
-  log_syslog_host: "localhost"  # Send logging messages to a remote or local Unix syslog
-  log_syslog_port: 514  # UDP port of the remote or local Unix syslog
+  log_syslog: False # If True, outputs to SysLog host and port specified
+  log_syslog_host: "localhost" # Send logging messages to a remote or local Unix syslog
+  log_syslog_port: 514 # UDP port of the remote or local Unix syslog
 
 seeder:
   # The fake full node used for crawling will run on this port.
@@ -120,7 +118,6 @@ harvester:
     batch_size: 300 # How many plot files the harvester processes before it waits batch_sleep_milliseconds
     batch_sleep_milliseconds: 1 # Milliseconds the harvester sleeps between batch processing
 
-
   # If True use parallel reads in chiapos
   parallel_read: True
 
@@ -133,8 +130,8 @@ harvester:
   recursive_plot_scan: False # If True the harvester scans plots recursively in the provided directories.
 
   ssl:
-    private_crt:  "config/ssl/harvester/private_harvester.crt"
-    private_key:  "config/ssl/harvester/private_harvester.key"
+    private_crt: "config/ssl/harvester/private_harvester.crt"
+    private_key: "config/ssl/harvester/private_harvester.key"
 
   private_ssl_ca:
     crt: "config/ssl/ca/private_ca.crt"
@@ -150,7 +147,6 @@ pool:
   logging: *logging
   network_overrides: *network_overrides
   selected_network: *selected_network
-
 
 farmer:
   # The farmer server (if run) will run on this port
@@ -179,10 +175,10 @@ farmer:
   selected_network: *selected_network
 
   ssl:
-    private_crt:  "config/ssl/farmer/private_farmer.crt"
-    private_key:  "config/ssl/farmer/private_farmer.key"
-    public_crt:  "config/ssl/farmer/public_farmer.crt"
-    public_key:  "config/ssl/farmer/public_farmer.key"
+    private_crt: "config/ssl/farmer/private_farmer.crt"
+    private_key: "config/ssl/farmer/private_farmer.key"
+    public_crt: "config/ssl/farmer/public_farmer.crt"
+    public_key: "config/ssl/farmer/public_farmer.key"
 
 # Don't run this unless you want to run VDF clients on the local machine.
 timelord_launcher:
@@ -192,7 +188,6 @@ timelord_launcher:
   # Number of VDF client processes to keep alive in the local machine.
   process_count: 3
   logging: *logging
-
 
 timelord:
   # The timelord server (if run) will run on this port
@@ -207,8 +202,8 @@ timelord:
     ips_estimate:
       - 150000
   full_node_peer:
-      host: *self_hostname
-      port: 38888
+    host: *self_hostname
+    port: 38888
   # Maximum number of seconds allowed for a client to reconnect to the server.
   max_connection_time: 60
   # The ip and port where the TCP clients will connect.
@@ -247,10 +242,10 @@ timelord:
   rpc_port: 38883
 
   ssl:
-    private_crt:  "config/ssl/timelord/private_timelord.crt"
-    private_key:  "config/ssl/timelord/private_timelord.key"
-    public_crt:  "config/ssl/timelord/public_timelord.crt"
-    public_key:  "config/ssl/timelord/public_timelord.key"
+    private_crt: "config/ssl/timelord/private_timelord.crt"
+    private_key: "config/ssl/timelord/private_timelord.key"
+    public_crt: "config/ssl/timelord/public_timelord.crt"
+    public_key: "config/ssl/timelord/public_timelord.key"
 
 full_node:
   # The full node server (if run) will run on this port
@@ -310,7 +305,7 @@ full_node:
   # Accept peers until this number of connections
   target_peer_count: 80
   # Initiate outbound connections until this number is hit.
-  target_outbound_peer_count: 18
+  target_outbound_peer_count: 8
   # IPv4/IPv6 network addresses and CIDR blocks allowed to connect even when target_peer_count has been hit.
   # exempt_peer_networks: ["192.168.0.3", "192.168.1.0/24", "fe80::/10", "2606:4700:4700::64/128"]
   exempt_peer_networks: []
@@ -345,19 +340,30 @@ full_node:
   # Number of coin_ids | puzzle hashes that node will let wallets subscribe to
   max_subscribe_items: 200000
 
+  # the maximum number of CoinStates will be returned by a RegisterForPhUpdates
+  # request, for untrusted peers
+  max_subscribe_response_items: 100000
+
+  # Number of coin_ids | puzzle hashes that node will let local wallets subscribe to
+  trusted_max_subscribe_items: 2000000
+
+  # the maximum number of CoinStates will be returned by a RegisterForPhUpdates
+  # request, for trusted peers
+  trusted_max_subscribe_response_items: 500000
+
   # List of trusted DNS seeders to bootstrap from.
   # If you modify this, please change the hardcode as well from FullNode.set_server()
-  dns_servers:
+  dns_servers: &dns_servers
     - "dns-introducer.ballcoin.top"
   farmer_peer:
-      host: *self_hostname
-      port: 38891
+    host: *self_hostname
+    port: 38891
   timelord_peer:
-      host: *self_hostname
-      port: 38890
+    host: *self_hostname
+    port: 38890
   introducer_peer:
-      host: introducer.ballcoin.top  # Chia AWS introducer IPv4/IPv6
-      port: 38888
+    host: introducer.ballcoin.top # Ball AWS introducer IPv4/IPv6
+    port: 38888
   wallet_peer:
     host: *self_hostname
     port: 38893
@@ -365,14 +371,19 @@ full_node:
   network_overrides: *network_overrides
   selected_network: *selected_network
 
+  # Node IDs of trusted wallet peers, allows using more permissive limits on sync
+  trusted_peers:
+    0ThisisanexampleNodeID7ff9d60f1c3fa270c213c0ad0cb89c01274634a7c3cb7: Does_not_matter
+
   ssl:
-    private_crt:  "config/ssl/full_node/private_full_node.crt"
-    private_key:  "config/ssl/full_node/private_full_node.key"
-    public_crt:  "config/ssl/full_node/public_full_node.crt"
-    public_key:  "config/ssl/full_node/public_full_node.key"
+    private_crt: "config/ssl/full_node/private_full_node.crt"
+    private_key: "config/ssl/full_node/private_full_node.key"
+    public_crt: "config/ssl/full_node/public_full_node.crt"
+    public_key: "config/ssl/full_node/public_full_node.key"
+  use_ball_loop_policy: True
 
 ui:
-   # The ui node server (if run) will run on this port
+  # The ui node server (if run) will run on this port
   port: 38894
 
   # Which port to use to communicate with the full node
@@ -404,8 +415,8 @@ introducer:
   selected_network: *selected_network
 
   ssl:
-    public_crt:  "config/ssl/full_node/public_full_node.crt"
-    public_key:  "config/ssl/full_node/public_full_node.key"
+    public_crt: "config/ssl/full_node/public_full_node.crt"
+    public_key: "config/ssl/full_node/public_full_node.key"
 
 wallet:
   port: 38893
@@ -426,9 +437,11 @@ wallet:
   connect_to_unknown_peers: True
 
   initial_num_public_keys: 425
+  reuse_public_key_for_change:
+    #Add your wallet fingerprint here, this is an example.
+    "2999502625": False
 
-  dns_servers:
-    - "dns-introducer.ballcoin.top"
+  dns_servers: *dns_servers
 
   full_node_peer:
     host: *self_hostname
@@ -461,14 +474,14 @@ wallet:
   recent_peer_threshold: 6000
 
   introducer_peer:
-    host: introducer.ballcoin.top # Chia AWS introducer IPv4/IPv6
+    host: introducer.ballcoin.top # Ball AWS introducer IPv4/IPv6
     port: 38888
 
   ssl:
-    private_crt:  "config/ssl/wallet/private_wallet.crt"
-    private_key:  "config/ssl/wallet/private_wallet.key"
-    public_crt:  "config/ssl/wallet/public_wallet.crt"
-    public_key:  "config/ssl/wallet/public_wallet.key"
+    private_crt: "config/ssl/wallet/private_wallet.crt"
+    private_key: "config/ssl/wallet/private_wallet.key"
+    public_crt: "config/ssl/wallet/public_wallet.crt"
+    public_key: "config/ssl/wallet/public_wallet.key"
 
   # Node IDs of trusted full node peers, for performing a fast trusted wallet sync
   trusted_peers:
@@ -490,12 +503,15 @@ wallet:
   # Interval to resend unconfirmed transactions, even if previously accepted into Mempool
   tx_resend_timeout_secs: 1800
 
+  # Reset wallet sync data on start for given fingerprint
+  reset_sync_for_fingerprint: null
+
   # After n received unspent transactions, the spam filter will be enabled, which will filter out received
   # coins with very small value. Any standard TX under ball_spam_amount is filtered
   spam_filter_after_n_txs: 200
   ball_spam_amount: 1000000
-  # Accept notifications from parties on chain
-  accept_notifications: False
+  # Enable notifications from parties on chain
+  enable_notifications: True
   # The amount someone has to pay you in mojos for you to see their notification
   required_notification_amount: 10000000
 
@@ -504,7 +520,7 @@ data_layer:
   # TODO: organize consistently with other sections
 
   # TODO: shouldn't we not need this since we have no actual public interface (yet)?
-  port: 38884
+  port: 38886
   wallet_peer:
     host: localhost
     port: 38895
@@ -514,6 +530,9 @@ data_layer:
   server_files_location: "data_layer/db/server_files_location_CHALLENGE"
   # The timeout for the client to download a file from a server
   client_timeout: 15
+  # If you need use a proxy for download data you can use this setting sample
+  # proxy_url: http://localhost:8888
+
   # Data for running a data layer server.
   host_ip: 0.0.0.0
   host_port: 38896
@@ -531,13 +550,14 @@ data_layer:
   # TODO: which of these are really appropriate?
 
   ssl:
-    private_crt:  "config/ssl/data_layer/private_data_layer.crt"
-    private_key:  "config/ssl/data_layer/private_data_layer.key"
-    public_crt:  "config/ssl/data_layer/public_data_layer.crt"
-    public_key:  "config/ssl/data_layer/public_data_layer.key"
+    private_crt: "config/ssl/data_layer/private_data_layer.crt"
+    private_key: "config/ssl/data_layer/private_data_layer.key"
+    public_crt: "config/ssl/data_layer/public_data_layer.crt"
+    public_key: "config/ssl/data_layer/public_data_layer.key"
 
+  uploaders: []
+  downloaders: []
 simulator:
-
   # Should the simulator farm a block whenever a transaction is in mempool
   auto_farm: True
 

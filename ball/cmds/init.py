@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import click
 
 
@@ -22,7 +24,14 @@ import click
     help="Initialize the blockchain database in v1 format (compatible with older versions of the full node)",
 )
 @click.pass_context
-def init_cmd(ctx: click.Context, create_certs: str, fix_ssl_permissions: bool, testnet: bool, v1_db: bool, **kwargs):
+def init_cmd(
+    ctx: click.Context,
+    create_certs: str,
+    fix_ssl_permissions: bool,
+    testnet: bool,
+    set_passphrase: bool,
+    v1_db: bool,
+) -> None:
     """
     Create a new configuration or migrate from previous versions to current
 
@@ -33,13 +42,14 @@ def init_cmd(ctx: click.Context, create_certs: str, fix_ssl_permissions: bool, t
     - Run `ball init -c [directory]` on your remote harvester,
       where [directory] is the the copy of your Farming Machine CA directory
     - Get more details on remote harvester on Ball wiki:
-      https://github.com/denisio/ball-blockchain/wiki/Farming-on-many-machines
+      https://github.com/Ball-Network/ballcoin-blockchain/wiki/Farming-on-many-machines
     """
     from pathlib import Path
-    from .init_funcs import init
+
     from ball.cmds.passphrase_funcs import initialize_passphrase
 
-    set_passphrase = kwargs.get("set_passphrase")
+    from .init_funcs import init
+
     if set_passphrase:
         initialize_passphrase()
 
@@ -53,7 +63,8 @@ def init_cmd(ctx: click.Context, create_certs: str, fix_ssl_permissions: bool, t
 
 
 if __name__ == "__main__":
-    from .init_funcs import ball_init
     from ball.util.default_root import DEFAULT_ROOT_PATH
+
+    from .init_funcs import ball_init
 
     ball_init(DEFAULT_ROOT_PATH)

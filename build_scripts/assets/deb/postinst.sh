@@ -3,4 +3,5 @@
 
 set -e
 
-ln -s /opt/ball/resources/app.asar.unpacked/daemon/ballcoin /usr/bin/ballcoin || true
+ln -s /opt/ball/resources/app.asar.unpacked/daemon/ball /usr/bin/ball || true
+ln -s /opt/ball/ballcoin-blockchain /usr/bin/ballcoin-blockchain || true

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, List, Tuple
+from typing import Optional, Tuple, List
 
 from blspy import G2Element, G1Element
 
@@ -42,6 +42,7 @@ class DeclareProofOfSpace(Streamable):
     farmer_puzzle_hash: bytes32
     pool_target: Optional[PoolTarget]
     pool_signature: Optional[G2Element]
+    difficulty_coefficient: str
 
 
 @streamable
@@ -82,7 +83,3 @@ class FarmerStakings(Streamable):
 @dataclass(frozen=True)
 class RequestStakings(Streamable):
     public_keys: List[G1Element]
-    # None means current peak
-    height: Optional[uint32]
-    # wallet can calculate this on itself
-    blocks: Optional[uint64]

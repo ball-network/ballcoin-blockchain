@@ -1,19 +1,18 @@
+from __future__ import annotations
+
 import asyncio
-import click
 import sys
 from io import TextIOWrapper
 from typing import Optional
+
+import click
 
 from ball.util.config import load_config
 
 
 @click.group("passphrase", short_help="Manage your keyring passphrase")
-@click.pass_context
-def passphrase_cmd(ctx: click.Context):
-    from .keys_funcs import migrate_keys
-
-    if ctx.obj["force_legacy_keyring_migration"] and not asyncio.run(migrate_keys(ctx.obj["root_path"], True)):
-        sys.exit(1)
+def passphrase_cmd() -> None:
+    pass
 
 
 @passphrase_cmd.command(
@@ -110,7 +109,7 @@ def hint_cmd() -> None:
 
 
 @hint_cmd.command("display", short_help="Display the keyring passphrase hint")
-def display_hint():
+def display_hint() -> None:
     from .passphrase_funcs import display_passphrase_hint
 
     display_passphrase_hint()
@@ -118,14 +117,14 @@ def display_hint():
 
 @hint_cmd.command("set", short_help="Set or update the keyring passphrase hint")
 @click.argument("hint", nargs=1)
-def set_hint(hint):
+def set_hint(hint: str) -> None:
     from .passphrase_funcs import set_passphrase_hint
 
     set_passphrase_hint(hint)
 
 
 @hint_cmd.command("remove", short_help="Remove the keyring passphrase hint")
-def remove_hint():
+def remove_hint() -> None:
     from .passphrase_funcs import remove_passphrase_hint
 
     remove_passphrase_hint()

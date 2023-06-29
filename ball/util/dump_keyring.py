@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 
+from __future__ import annotations
+
+from io import TextIOWrapper
+from pathlib import Path
+from typing import Optional
+
 import click
 import colorama
 import yaml
+from cryptography.exceptions import InvalidTag
 
 from ball.cmds.passphrase_funcs import prompt_for_passphrase, read_passphrase_from_file
 from ball.util.default_root import DEFAULT_KEYS_ROOT_PATH
 from ball.util.file_keyring import FileKeyringContent
 from ball.util.keyring_wrapper import DEFAULT_PASSPHRASE_IF_NO_MASTER_PASSPHRASE, KeyringWrapper
-from cryptography.exceptions import InvalidTag
-from io import TextIOWrapper
-from pathlib import Path
-from typing import Optional
 
 DEFAULT_KEYRING_YAML = DEFAULT_KEYS_ROOT_PATH / "keyring.yaml"
 

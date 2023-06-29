@@ -1,33 +1,32 @@
+from __future__ import annotations
+
 import asyncio
 import functools
-import os
 import logging
 import logging.config
+import os
 import signal
 import sys
-from typing import Any, Callable, Coroutine, Dict, Generic, List, Optional, Tuple, Type, TypeVar
-
-from ball.daemon.server import service_launch_lock_path
-from ball.util.lock import Lockfile, LockfileError
-from ball.server.ssl_context import ball_ssl_ca_paths, private_ssl_ca_paths
-from ..protocols.shared_protocol import capabilities
-
-try:
-    import uvloop
-except ImportError:
-    uvloop = None
+from pathlib import Path
+from types import FrameType
+from typing import Any, Awaitable, Callable, Coroutine, Dict, Generic, List, Optional, Set, Tuple, Type, TypeVar
 
 from ball.cmds.init_funcs import ball_full_version_str
-from ball.rpc.rpc_server import RpcApiProtocol, RpcServiceProtocol, start_rpc_server, RpcServer
+from ball.daemon.server import service_launch_lock_path
+from ball.rpc.rpc_server import RpcApiProtocol, RpcServer, RpcServiceProtocol, start_rpc_server
+from ball.server.ball_policy import set_ball_policy
 from ball.server.outbound_message import NodeType
 from ball.server.server import BallServer
+from ball.server.ssl_context import ball_ssl_ca_paths, private_ssl_ca_paths
 from ball.server.upnp import UPnP
-from ball.types.peer_info import PeerInfo
-from ball.util.setproctitle import setproctitle
+from ball.server.ws_connection import WSBallConnection
+from ball.types.peer_info import PeerInfo, UnresolvedPeerInfo
 from ball.util.ints import uint16
+from ball.util.lock import Lockfile, LockfileError
+from ball.util.network import resolve
+from ball.util.setproctitle import setproctitle
 
-from .reconnect_task import start_reconnect_task
-
+from ..protocols.shared_protocol import capabilities
 
 # this is used to detect whether we are running in the main process or not, in
 # signal handlers. We need to ignore signals in the sub processes.
@@ -46,7 +45,7 @@ class ServiceException(Exception):
 class Service(Generic[_T_RpcServiceProtocol]):
     def __init__(
         self,
-        root_path,
+        root_path: Path,
         node: _T_RpcServiceProtocol,
         peer_api: Any,
         node_type: NodeType,
@@ -56,13 +55,13 @@ class Service(Generic[_T_RpcServiceProtocol]):
         *,
         config: Dict[str, Any],
         upnp_ports: List[int] = [],
-        server_listen_ports: List[int] = [],
-        connect_peers: List[PeerInfo] = [],
-        on_connect_callback: Optional[Callable] = None,
+        connect_peers: Set[UnresolvedPeerInfo] = set(),
+        on_connect_callback: Optional[Callable[[WSBallConnection], Awaitable[None]]] = None,
         rpc_info: Optional[RpcInfo] = None,
-        connect_to_daemon=True,
+        connect_to_daemon: bool = True,
         max_request_body_size: Optional[int] = None,
         override_capabilities: Optional[List[Tuple[uint16, str]]] = None,
+        listen: bool = True,
     ) -> None:
         self.root_path = root_path
         self.config = config
@@ -74,12 +73,15 @@ class Service(Generic[_T_RpcServiceProtocol]):
         self._node_type = node_type
         self._service_name = service_name
         self.rpc_server: Optional[RpcServer] = None
-        self._rpc_close_task: Optional[asyncio.Task] = None
+        self._rpc_close_task: Optional[asyncio.Task[None]] = None
         self._network_id: str = network_id
         self.max_request_body_size = max_request_body_size
+        self._listen = listen
+        self.reconnect_retry_seconds: int = 3
 
         self._log = logging.getLogger(service_name)
-        self._log.info(f"ball-blockchain version: {ball_full_version_str()}")
+        self._log.info(f"Starting service {self._service_name} ...")
+        self._log.info(f"ballcoin-blockchain version: {ball_full_version_str()}")
 
         self.service_config = self.config[service_name]
 
@@ -96,7 +98,7 @@ class Service(Generic[_T_RpcServiceProtocol]):
             capabilities_to_use = override_capabilities
 
         assert inbound_rlp and outbound_rlp
-        self._server = BallServer(
+        self._server = BallServer.create(
             advertised_port,
             node,
             peer_api,
@@ -119,7 +121,6 @@ class Service(Generic[_T_RpcServiceProtocol]):
             self._log.warning(f"No set_server method for {service_name}")
 
         self._upnp_ports = upnp_ports
-        self._server_listen_ports = server_listen_ports
 
         self._api = peer_api
         self._node = node
@@ -129,8 +130,43 @@ class Service(Generic[_T_RpcServiceProtocol]):
 
         self._on_connect_callback = on_connect_callback
         self._advertised_port = advertised_port
-        self._reconnect_tasks: Dict[PeerInfo, Optional[asyncio.Task]] = {peer: None for peer in connect_peers}
+        self._connect_peers = connect_peers
+        self._connect_peers_task: Optional[asyncio.Task[None]] = None
         self.upnp: UPnP = UPnP()
+
+    async def _connect_peers_task_handler(self) -> None:
+        resolved_peers: Dict[UnresolvedPeerInfo, PeerInfo] = {}
+        prefer_ipv6 = self.config.get("prefer_ipv6", False)
+        while True:
+            for unresolved in self._connect_peers:
+                resolved = resolved_peers.get(unresolved)
+                if resolved is None:
+                    try:
+                        resolved = PeerInfo(await resolve(unresolved.host, prefer_ipv6=prefer_ipv6), unresolved.port)
+                    except Exception as e:
+                        self._log.warning(f"Failed to resolve {unresolved.host}: {e}")
+                        continue
+                    self._log.info(f"Add resolved {resolved}")
+                    resolved_peers[unresolved] = resolved
+
+                if any(connection.peer_info == resolved for connection in self._server.all_connections.values()):
+                    continue
+
+                if not await self._server.start_client(resolved, None):
+                    self._log.info(f"Failed to connect to {resolved}")
+                    # Re-resolve to make sure the IP didn't change, this helps for example to keep dyndns hostnames
+                    # up to date.
+                    try:
+                        resolved_new = PeerInfo(
+                            await resolve(unresolved.host, prefer_ipv6=prefer_ipv6), unresolved.port
+                        )
+                    except Exception as e:
+                        self._log.warning(f"Failed to resolve after connection failure {unresolved.host}: {e}")
+                        continue
+                    if resolved_new != resolved:
+                        self._log.info(f"Host {unresolved.host} changed from {resolved} to {resolved_new}")
+                        resolved_peers[unresolved] = resolved_new
+            await asyncio.sleep(self.reconnect_retry_seconds)
 
     async def start(self) -> None:
         # TODO: move those parameters to `__init__`
@@ -151,13 +187,19 @@ class Service(Generic[_T_RpcServiceProtocol]):
             for port in self._upnp_ports:
                 self.upnp.remap(port)
 
-        await self._server.start_server(self.config.get("prefer_ipv6", False), self._on_connect_callback)
+        await self._server.start(
+            listen=self._listen,
+            prefer_ipv6=self.config.get("prefer_ipv6", False),
+            on_connect=self._on_connect_callback,
+        )
         self._advertised_port = self._server.get_port()
 
-        for peer in self._reconnect_tasks.keys():
-            self.add_peer(peer)
+        self._connect_peers_task = asyncio.create_task(self._connect_peers_task_handler())
 
-        self._log.info(f"Started {self._service_name} service on network_id: {self._network_id}")
+        self._log.info(
+            f"Started {self._service_name} service on network_id: {self._network_id} "
+            f"at port {self._advertised_port}"
+        )
 
         self._rpc_close_task = None
         if self._rpc_info:
@@ -183,13 +225,8 @@ class Service(Generic[_T_RpcServiceProtocol]):
             self._log.error(f"{self._service_name}: already running")
             raise ValueError(f"{self._service_name}: already running") from e
 
-    def add_peer(self, peer: PeerInfo) -> None:
-        if self._reconnect_tasks.get(peer) is not None:
-            raise ServiceException(f"Peer {peer} already added")
-
-        self._reconnect_tasks[peer] = start_reconnect_task(
-            self._server, peer, self._log, self.config.get("prefer_ipv6")
-        )
+    def add_peer(self, peer: UnresolvedPeerInfo) -> None:
+        self._connect_peers.add(peer)
 
     async def setup_process_global_state(self) -> None:
         # Being async forces this to be run from within an active event loop as is
@@ -215,7 +252,7 @@ class Service(Generic[_T_RpcServiceProtocol]):
                 functools.partial(self._accept_signal, signal_number=signal.SIGTERM),
             )
 
-    def _accept_signal(self, signal_number: int, stack_frame=None):
+    def _accept_signal(self, signal_number: int, stack_frame: Optional[FrameType] = None) -> None:
         self._log.info(f"got signal {signal_number}")
 
         # we only handle signals in the main process. In the ProcessPoolExecutor
@@ -229,6 +266,7 @@ class Service(Generic[_T_RpcServiceProtocol]):
     def stop(self) -> None:
         if not self._is_stopping.is_set():
             self._is_stopping.set()
+            self._log.info(f"Stopping service {self._service_name} at port {self._advertised_port} ...")
 
             # start with UPnP, since this can take a while, we want it to happen
             # in the background while shutting down everything else
@@ -236,10 +274,8 @@ class Service(Generic[_T_RpcServiceProtocol]):
                 self.upnp.release(port)
 
             self._log.info("Cancelling reconnect task")
-            for task in self._reconnect_tasks.values():
-                if task is not None:
-                    task.cancel()
-            self._reconnect_tasks.clear()
+            if self._connect_peers_task is not None:
+                self._connect_peers_task.cancel()
             self._log.info("Closing connections")
             self._server.close_all()
             self._node._close()
@@ -272,10 +308,10 @@ class Service(Generic[_T_RpcServiceProtocol]):
 
         self._did_start = False
         self._is_stopping.clear()
-        self._log.info(f"Service {self._service_name} at port {self._advertised_port} fully closed")
+        self._log.info(f"Service {self._service_name} at port {self._advertised_port} fully stopped")
 
 
-def async_run(coro: Coroutine[object, object, T]) -> T:
-    if uvloop is not None:
-        uvloop.install()
+def async_run(coro: Coroutine[object, object, T], connection_limit: Optional[int] = None) -> T:
+    if connection_limit is not None:
+        set_ball_policy(connection_limit)
     return asyncio.run(coro)

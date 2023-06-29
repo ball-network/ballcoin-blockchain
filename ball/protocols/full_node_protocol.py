@@ -91,6 +91,7 @@ class RespondBlocks(Streamable):
     start_height: uint32
     end_height: uint32
     blocks: List[FullBlock]
+    difficulty_coefficients: List[str]
 
 
 @streamable
@@ -104,6 +105,7 @@ class RejectBlocks(Streamable):
 @dataclass(frozen=True)
 class RespondBlock(Streamable):
     block: FullBlock
+    difficulty_coefficient: str
 
 
 @streamable

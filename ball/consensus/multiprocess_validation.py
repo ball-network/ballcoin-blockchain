@@ -22,6 +22,7 @@ from ball.consensus.pot_iterations import calculate_iterations_quality, is_overf
 from ball.full_node.mempool_check_conditions import get_name_puzzle_conditions
 from ball.types.block_protocol import BlockInfo
 from ball.types.blockchain_format.coin import Coin
+from ball.types.blockchain_format.proof_of_space import verify_and_get_quality_string
 from ball.types.blockchain_format.sized_bytes import bytes32
 from ball.types.blockchain_format.sub_epoch_summary import SubEpochSummary
 from ball.types.full_block import FullBlock
@@ -45,7 +46,6 @@ class PreValidationResult(Streamable):
     required_iters: Optional[uint64]  # Iff error is None
     npc_result: Optional[NPCResult]  # Iff error is None and block is a transaction block
     validated_signature: bool
-    difficulty_coefficient: Optional[str]
 
 
 def batch_pre_validate_blocks(
@@ -93,12 +93,13 @@ def batch_pre_validate_blocks(
                     npc_result = get_name_puzzle_conditions(
                         block_generator,
                         min(constants.MAX_BLOCK_COST_CLVM, block.transactions_info.cost),
-                        cost_per_byte=constants.COST_PER_BYTE,
                         mempool_mode=False,
+                        height=block.height,
+                        constants=constants,
                     )
                     removals, tx_additions = tx_removals_and_additions(npc_result.conds)
                 if npc_result is not None and npc_result.error is not None:
-                    results.append(PreValidationResult(uint16(npc_result.error), None, npc_result, False, None))
+                    results.append(PreValidationResult(uint16(npc_result.error), None, npc_result, False))
                     continue
 
                 difficulty_coefficient = difficulty_coefficients[i]  # staking
@@ -119,14 +120,17 @@ def batch_pre_validate_blocks(
                 successfully_validated_signatures = False
                 # If we failed CLVM, no need to validate signature, the block is already invalid
                 if error_int is None:
-
                     # If this is False, it means either we don't have a signature (not a tx block) or we have an invalid
                     # signature (which also puts in an error) or we didn't validate the signature because we want to
-                    # validate it later. receive_block will attempt to validate the signature later.
+                    # validate it later. add_block will attempt to validate the signature later.
                     if validate_signatures:
                         if npc_result is not None and block.transactions_info is not None:
                             assert npc_result.conds
-                            pairs_pks, pairs_msgs = pkm_pairs(npc_result.conds, constants.AGG_SIG_ME_ADDITIONAL_DATA)
+                            pairs_pks, pairs_msgs = pkm_pairs(
+                                npc_result.conds,
+                                constants.AGG_SIG_ME_ADDITIONAL_DATA,
+                                soft_fork=block.height >= constants.SOFT_FORK_HEIGHT,
+                            )
                             # Using AugSchemeMPL.aggregate_verify, so it's safe to use from_bytes_unchecked
                             pks_objects: List[G1Element] = [G1Element.from_bytes_unchecked(pk) for pk in pairs_pks]
                             if not AugSchemeMPL.aggregate_verify(
@@ -137,15 +141,12 @@ def batch_pre_validate_blocks(
                                 successfully_validated_signatures = True
 
                 results.append(
-                    PreValidationResult(
-                        error_int, required_iters, npc_result,
-                        successfully_validated_signatures, str(difficulty_coefficient)
-                    )
+                    PreValidationResult(error_int, required_iters, npc_result, successfully_validated_signatures)
                 )
             except Exception:
                 error_stack = traceback.format_exc()
                 log.error(f"Exception: {error_stack}")
-                results.append(PreValidationResult(uint16(Err.UNKNOWN.value), None, None, False, None))
+                results.append(PreValidationResult(uint16(Err.UNKNOWN.value), None, None, False))
     # In this case, we are validating header blocks
     elif header_blocks_pickled is not None:
         for i in range(len(header_blocks_pickled)):
@@ -163,11 +164,11 @@ def batch_pre_validate_blocks(
                 error_int = None
                 if error is not None:
                     error_int = uint16(error.code.value)
-                results.append(PreValidationResult(error_int, required_iters, None, False, None))
+                results.append(PreValidationResult(error_int, required_iters, None, False))
             except Exception:
                 error_stack = traceback.format_exc()
                 log.error(f"Exception: {error_stack}")
-                results.append(PreValidationResult(uint16(Err.UNKNOWN.value), None, None, False, None))
+                results.append(PreValidationResult(uint16(Err.UNKNOWN.value), None, None, False))
     return [bytes(r) for r in results]
 
 
@@ -175,6 +176,7 @@ async def pre_validate_blocks_multiprocessing(
     constants: ConsensusConstants,
     block_records: BlockchainInterface,
     blocks: Sequence[FullBlock],
+    difficulty_coefficients: List[Decimal],
     pool: Executor,
     check_filter: bool,
     npc_results: Dict[uint32, NPCResult],
@@ -207,7 +209,7 @@ async def pre_validate_blocks_multiprocessing(
     num_blocks_seen = 0
     if blocks[0].height > 0:
         if not block_records.contains_block(blocks[0].prev_header_hash):
-            return [PreValidationResult(uint16(Err.INVALID_PREV_BLOCK_HASH.value), None, None, False, None)]
+            return [PreValidationResult(uint16(Err.INVALID_PREV_BLOCK_HASH.value), None, None, False)]
         curr = block_records.block_record(blocks[0].prev_header_hash)
         num_sub_slots_to_look_for = 3 if curr.overflow else 2
         while (
@@ -232,7 +234,7 @@ async def pre_validate_blocks_multiprocessing(
         block_record_was_present.append(block_records.contains_block(block.header_hash))
 
     diff_ssis: List[Tuple[uint64, uint64, Decimal]] = []
-    for block in blocks:
+    for i, block in enumerate(blocks):
         if block.height != 0:
             assert block_records.contains_block(block.prev_header_hash)
             if prev_b is None:
@@ -248,19 +250,16 @@ async def pre_validate_blocks_multiprocessing(
             cc_sp_hash: bytes32 = challenge
         else:
             cc_sp_hash = block.reward_chain_block.challenge_chain_sp_vdf.output.get_hash()
-        q_str: Optional[bytes32] = block.reward_chain_block.proof_of_space.verify_and_get_quality_string(
-            constants, challenge, cc_sp_hash
+        q_str: Optional[bytes32] = verify_and_get_quality_string(
+            block.reward_chain_block.proof_of_space, constants, challenge, cc_sp_hash
         )
         if q_str is None:
-            for i, block_i in enumerate(blocks):
-                if not block_record_was_present[i] and block_records.contains_block(block_i.header_hash):
+            for n, block_i in enumerate(blocks):
+                if not block_record_was_present[n] and block_records.contains_block(block_i.header_hash):
                     block_records.remove_block_record(block_i.header_hash)
-            return [PreValidationResult(uint16(Err.INVALID_POSPACE.value), None, None, False, None)]
+            return [PreValidationResult(uint16(Err.INVALID_POSPACE.value), None, None, False)]
         # staking
-        difficulty_coefficient = await block_records.get_farmer_difficulty_coefficient(
-            block.reward_chain_block.proof_of_space.farmer_public_key, block.height - 1 if block.height > 0 else 0
-        )
-        # log.info(f"[debug] validating {block.reward_chain_block.height}, {difficulty_coefficient}")
+        difficulty_coefficient = difficulty_coefficients[i]
         required_iters: uint64 = calculate_iterations_quality(
             constants.DIFFICULTY_CONSTANT_FACTOR,
             q_str,
@@ -269,6 +268,7 @@ async def pre_validate_blocks_multiprocessing(
             cc_sp_hash,
             difficulty_coefficient,
         )
+
         try:
             block_rec = block_to_block_record(
                 constants,
@@ -278,14 +278,14 @@ async def pre_validate_blocks_multiprocessing(
                 None,
             )
         except ValueError:
-            return [PreValidationResult(uint16(Err.INVALID_SUB_EPOCH_SUMMARY.value), None, None, False, None)]
+            return [PreValidationResult(uint16(Err.INVALID_SUB_EPOCH_SUMMARY.value), None, None, False)]
 
         if block_rec.sub_epoch_summary_included is not None and wp_summaries is not None:
             idx = int(block.height / constants.SUB_EPOCH_BLOCKS) - 1
             next_ses = wp_summaries[idx]
             if not block_rec.sub_epoch_summary_included.get_hash() == next_ses.get_hash():
                 log.error("sub_epoch_summary does not match wp sub_epoch_summary list")
-                return [PreValidationResult(uint16(Err.INVALID_SUB_EPOCH_SUMMARY.value), None, None, False, None)]
+                return [PreValidationResult(uint16(Err.INVALID_SUB_EPOCH_SUMMARY.value), None, None, False)]
         # Makes sure to not override the valid blocks already in block_records
         if not block_records.contains_block(block_rec.header_hash):
             block_records.add_block_record(block_rec)  # Temporarily add block to dict
@@ -340,7 +340,7 @@ async def pre_validate_blocks_multiprocessing(
                 except ValueError:
                     return [
                         PreValidationResult(
-                            uint16(Err.FAILED_GETTING_GENERATOR_MULTIPROCESSING.value), None, None, False, None
+                            uint16(Err.FAILED_GETTING_GENERATOR_MULTIPROCESSING.value), None, None, False
                         )
                     ]
                 if block_generator is not None:
@@ -381,6 +381,7 @@ def _run_generator(
     constants: ConsensusConstants,
     unfinished_block_bytes: bytes,
     block_generator_bytes: bytes,
+    height: uint32,
 ) -> Optional[bytes]:
     """
     Runs the CLVM generator from bytes inputs. This is meant to be called under a ProcessPoolExecutor, in order to
@@ -394,8 +395,8 @@ def _run_generator(
         npc_result: NPCResult = get_name_puzzle_conditions(
             block_generator,
             min(constants.MAX_BLOCK_COST_CLVM, unfinished_block.transactions_info.cost),
-            cost_per_byte=constants.COST_PER_BYTE,
             mempool_mode=False,
+            height=height,
         )
         return bytes(npc_result)
     except ValidationError as e:

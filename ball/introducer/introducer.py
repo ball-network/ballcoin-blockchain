@@ -1,12 +1,14 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
-from ball.rpc.rpc_server import default_get_connections
+from ball.rpc.rpc_server import StateChangedProtocol, default_get_connections
+from ball.server.introducer_peers import VettedPeer
 from ball.server.outbound_message import NodeType
 from ball.server.server import BallServer
-from ball.server.introducer_peers import VettedPeer
 from ball.server.ws_connection import WSBallConnection
 from ball.util.ints import uint64
 
@@ -42,7 +44,7 @@ class Introducer:
     async def on_connect(self, peer: WSBallConnection) -> None:
         pass
 
-    def _set_state_changed_callback(self, callback: Callable):
+    def _set_state_changed_callback(self, callback: StateChangedProtocol) -> None:
         # TODO: fill this out?
         pass
 

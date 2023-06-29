@@ -75,29 +75,6 @@ hiddenimports.extend(keyring_imports)
 
 binaries = []
 
-if os.path.exists(f"{ROOT}/madmax/ball_plot"):
-    binaries.extend([
-        (
-            f"{ROOT}/madmax/ball_plot",
-            "madmax"
-        )
-    ])
-
-if os.path.exists(f"{ROOT}/madmax/ball_plot_k34",):
-    binaries.extend([
-        (
-            f"{ROOT}/madmax/ball_plot_k34",
-            "madmax"
-        )
-    ])
-
-if os.path.exists(f"{ROOT}/bladebit/bladebit"):
-    binaries.extend([
-        (
-            f"{ROOT}/bladebit/bladebit",
-            "bladebit"
-        )
-    ])
 
 if THIS_IS_WINDOWS:
     hiddenimports.extend(["win32timezone", "win32cred", "pywintypes", "win32ctypes.pywin32"])
@@ -124,7 +101,53 @@ if THIS_IS_WINDOWS:
             ".",
         ),
     ]
+    if os.path.exists(f"{ROOT}/madmax/chia_plot.exe"):
+        binaries.extend([
+            (
+                f"{ROOT}/madmax/chia_plot.exe",
+                "madmax"
+            )
+        ])
 
+    if os.path.exists(f"{ROOT}/madmax/chia_plot_k34.exe",):
+        binaries.extend([
+            (
+                f"{ROOT}/madmax/chia_plot_k34.exe",
+                "madmax"
+            )
+        ])
+
+    if os.path.exists(f"{ROOT}/bladebit/bladebit.exe"):
+        binaries.extend([
+            (
+                f"{ROOT}/bladebit/bladebit.exe",
+                "bladebit"
+            )
+        ])
+else:
+    if os.path.exists(f"{ROOT}/madmax/chia_plot"):
+        binaries.extend([
+            (
+                f"{ROOT}/madmax/chia_plot",
+                "madmax"
+            )
+        ])
+
+    if os.path.exists(f"{ROOT}/madmax/chia_plot_k34",):
+        binaries.extend([
+            (
+                f"{ROOT}/madmax/chia_plot_k34",
+                "madmax"
+            )
+        ])
+
+    if os.path.exists(f"{ROOT}/bladebit/bladebit"):
+        binaries.extend([
+            (
+                f"{ROOT}/bladebit/bladebit",
+                "bladebit"
+            )
+        ])
 
 datas = []
 
@@ -190,6 +213,7 @@ for server in SERVERS:
 add_binary("start_crawler", f"{ROOT}/ball/seeder/start_crawler.py", COLLECT_ARGS)
 add_binary("start_seeder", f"{ROOT}/ball/seeder/dns_server.py", COLLECT_ARGS)
 add_binary("start_data_layer_http", f"{ROOT}/ball/data_layer/data_layer_server.py", COLLECT_ARGS)
+add_binary("start_data_layer_s3_plugin", f"{ROOT}/ball/data_layer/s3_plugin_service.py", COLLECT_ARGS)
 
 COLLECT_KWARGS = dict(
     strip=False,

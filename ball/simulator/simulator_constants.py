@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 if __name__ == "__main__":
-    from ball.util.default_root import DEFAULT_ROOT_PATH
     from ball.simulator.block_tools import create_block_tools, test_constants
-    from tests.util.keyring import TempKeyring
+    from ball.simulator.keyring import TempKeyring
+    from ball.util.default_root import DEFAULT_ROOT_PATH
 
     with TempKeyring() as keychain:
         # TODO: mariano: fix this with new consensus

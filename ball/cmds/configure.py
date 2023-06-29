@@ -24,7 +24,7 @@ def configure(
     crawler_minimum_version_count: Optional[int],
     seeder_domain_name: str,
     seeder_nameserver: str,
-):
+) -> None:
     config_yaml = "config.yaml"
     with lock_and_load_config(root_path, config_yaml, fill_missing_services=True) as config:
         config.update(load_defaults_for_missing_services(config=config, config_name=config_yaml))
@@ -101,10 +101,10 @@ def configure(
             if testnet == "true" or testnet == "t":
                 print("Setting Testnet")
                 testnet_port = "38988"
-                testnet_introducer = "introducer-testnet10.ballcoin.top"
-                testnet_dns_introducer = "dns-introducer-testnet10.ballcoin.top"
-                bootstrap_peers = ["testnet10-node.ballcoin.top"]
-                testnet = "testnet10"
+                testnet_introducer = "introducer-testnet0.ballcoin.top"
+                testnet_dns_introducer = "dns-introducer-testnet0.ballcoin.top"
+                bootstrap_peers = ["testnet0-node.ballcoin.top"]
+                testnet = "testnet0"
                 config["full_node"]["port"] = int(testnet_port)
                 if config["full_node"]["introducer_peer"] is None:
                     config["full_node"]["introducer_peer"] = {}
@@ -269,22 +269,22 @@ def configure(
 )
 @click.pass_context
 def configure_cmd(
-    ctx,
-    set_farmer_peer,
-    set_node_introducer,
-    set_fullnode_port,
-    set_harvester_port,
-    set_log_level,
-    enable_upnp,
-    set_outbound_peer_count,
-    set_peer_count,
-    testnet,
-    set_peer_connect_timeout,
-    crawler_db_path,
-    crawler_minimum_version_count,
-    seeder_domain_name,
-    seeder_nameserver,
-):
+    ctx: click.Context,
+    set_farmer_peer: str,
+    set_node_introducer: str,
+    set_fullnode_port: str,
+    set_harvester_port: str,
+    set_log_level: str,
+    enable_upnp: str,
+    set_outbound_peer_count: str,
+    set_peer_count: str,
+    testnet: str,
+    set_peer_connect_timeout: str,
+    crawler_db_path: str,
+    crawler_minimum_version_count: int,
+    seeder_domain_name: str,
+    seeder_nameserver: str,
+) -> None:
     configure(
         ctx.obj["root_path"],
         set_farmer_peer,

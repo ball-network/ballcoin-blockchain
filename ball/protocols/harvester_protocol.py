@@ -41,7 +41,7 @@ class NewSignagePointHarvester(Streamable):
     sp_hash: bytes32
     timelord_fee_puzzle_hash: bytes32
     pool_difficulties: List[PoolDifficulty]
-    stakings: List[Tuple[G1Element, str]]  # staking difficulty_coefficient
+    stakings: List[Tuple[G1Element, str]]  # staking difficulty_coefficient of each farmer public key's puzzle hash
 
 
 @streamable
@@ -52,7 +52,7 @@ class NewProofOfSpace(Streamable):
     plot_identifier: str
     proof: ProofOfSpace
     signage_point_index: uint8
-    difficulty_coefficient: str
+    difficulty_coefficient: str  # staking
 
 
 @streamable
@@ -73,6 +73,7 @@ class RespondSignatures(Streamable):
     local_pk: G1Element
     farmer_pk: G1Element
     message_signatures: List[Tuple[bytes32, G2Element]]
+    difficulty_coefficient: str
 
 
 @streamable
@@ -86,7 +87,7 @@ class Plot(Streamable):
     plot_public_key: G1Element
     file_size: uint64
     time_modified: uint64
-    farmer_public_key: G1Element
+    farmer_public_key: G1Element  # staking
 
 
 @streamable

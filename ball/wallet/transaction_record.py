@@ -1,18 +1,22 @@
-from dataclasses import dataclass
-from typing import Generic, List, Optional, Tuple, TypeVar, Dict
+from __future__ import annotations
 
-from ball.consensus.coinbase import pool_parent_id, farmer_parent_id
+from dataclasses import dataclass
+from typing import Dict, Generic, List, Optional, Tuple, TypeVar
+
+from ball.consensus.coinbase import farmer_parent_id, pool_parent_id
 from ball.types.blockchain_format.coin import Coin
 from ball.types.blockchain_format.sized_bytes import bytes32
 from ball.types.mempool_inclusion_status import MempoolInclusionStatus
 from ball.types.spend_bundle import SpendBundle
-from ball.util.bech32m import encode_puzzle_hash, decode_puzzle_hash
+from ball.util.bech32m import decode_puzzle_hash, encode_puzzle_hash
+from ball.util.errors import Err
 from ball.util.ints import uint8, uint32, uint64
 from ball.util.streamable import Streamable, streamable
 from ball.wallet.util.transaction_type import TransactionType
 
-
 T = TypeVar("T")
+
+minimum_send_attempts = 6
 
 
 @dataclass
@@ -52,7 +56,7 @@ class TransactionRecord(Streamable):
 
     def is_in_mempool(self) -> bool:
         # If one of the nodes we sent it to responded with success, we set it to success
-        for (_, mis, _) in self.sent_to:
+        for _, mis, _ in self.sent_to:
             if MempoolInclusionStatus(mis) == MempoolInclusionStatus.SUCCESS:
                 return True
         # Note, transactions pending inclusion (pending) return false
@@ -108,3 +112,15 @@ class TransactionRecord(Streamable):
             if memo is not None
         }
         return formatted
+
+    def is_valid(self) -> bool:
+        if len(self.sent_to) < minimum_send_attempts:
+            # we haven't tried enough peers yet
+            return True
+        if any(x[1] == MempoolInclusionStatus.SUCCESS for x in self.sent_to):
+            # we managed to push it to mempool at least once
+            return True
+        if any(x[2] in (Err.INVALID_FEE_LOW_FEE.name, Err.INVALID_FEE_TOO_CLOSE_TO_ZERO.name) for x in self.sent_to):
+            # we tried to push it to mempool and got a fee error so it's a temporary error
+            return True
+        return False

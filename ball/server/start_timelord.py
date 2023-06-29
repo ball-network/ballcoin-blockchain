@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import pathlib
 import sys
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from ball.consensus.constants import ConsensusConstants
 from ball.consensus.default_constants import DEFAULT_CONSTANTS
@@ -12,7 +12,7 @@ from ball.server.outbound_message import NodeType
 from ball.server.start_service import RpcInfo, Service, async_run
 from ball.timelord.timelord import Timelord
 from ball.timelord.timelord_api import TimelordAPI
-from ball.types.peer_info import PeerInfo
+from ball.types.peer_info import UnresolvedPeerInfo
 from ball.util.ball_logging import initialize_service_logging
 from ball.util.config import load_config, load_config_cli
 from ball.util.default_root import DEFAULT_ROOT_PATH
@@ -28,13 +28,15 @@ log = logging.getLogger(__name__)
 
 def create_timelord_service(
     root_path: pathlib.Path,
-    config: Dict,
+    config: Dict[str, Any],
     constants: ConsensusConstants,
     connect_to_daemon: bool = True,
 ) -> Service[Timelord]:
     service_config = config[SERVICE_NAME]
 
-    connect_peers = [PeerInfo(service_config["full_node_peer"]["host"], service_config["full_node_peer"]["port"])]
+    connect_peers = {
+        UnresolvedPeerInfo(service_config["full_node_peer"]["host"], service_config["full_node_peer"]["port"])
+    }
     overrides = service_config["network_overrides"]["constants"][service_config["selected_network"]]
     updated_constants = constants.replace_str_to_bytes(**overrides)
 
@@ -44,7 +46,7 @@ def create_timelord_service(
 
     rpc_info: Optional[RpcInfo] = None
     if service_config.get("start_rpc_server", True):
-        rpc_info = (TimelordRpcApi, service_config.get("rpc_port", 8557))
+        rpc_info = (TimelordRpcApi, service_config.get("rpc_port", 38883))
 
     return Service(
         root_path=root_path,
@@ -54,11 +56,11 @@ def create_timelord_service(
         node_type=NodeType.TIMELORD,
         advertised_port=service_config["port"],
         service_name=SERVICE_NAME,
-        server_listen_ports=[service_config["port"]],
         connect_peers=connect_peers,
         network_id=network_id,
         rpc_info=rpc_info,
         connect_to_daemon=connect_to_daemon,
+        listen=False,
     )
 
 

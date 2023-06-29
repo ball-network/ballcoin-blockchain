@@ -1,14 +1,18 @@
+from __future__ import annotations
+
 import re
-from typing import Optional, Tuple, List, Union
+from typing import List, Optional, Tuple, Union
+
+from clvm.casts import int_to_bytes
 
 from ball.full_node.generator import create_compressed_generator
-from ball.types.blockchain_format.program import SerializedProgram, Program
+from ball.types.blockchain_format.program import Program
+from ball.types.blockchain_format.serialized_program import SerializedProgram
 from ball.types.coin_spend import CoinSpend
 from ball.types.generator_types import BlockGenerator, CompressorArg
 from ball.types.spend_bundle import SpendBundle
 from ball.util.byte_types import hexstr_to_bytes
 from ball.util.ints import uint32
-from clvm.casts import int_to_bytes
 
 
 def _serialize_amount(val: int) -> bytes:

@@ -71,7 +71,7 @@ def create_foliage(
         total_iters_sp: total iters at the signage point
         timestamp: timestamp to put into the foliage block
         farmer_reward_puzzlehash: where to pay out farming reward
-        timelord_fee_puzzlehash: where to pay out timelord fee
+        timelord_fee_puzzlehash: where to pay out timelord reward
         pool_target: where to pay out pool reward
         get_plot_signature: retrieve the signature corresponding to the plot public key
         get_pool_signature: retrieve the signature corresponding to the pool public key
@@ -136,10 +136,7 @@ def create_foliage(
         if block_generator is not None:
             generator_block_heights_list = block_generator.block_height_list
             result: NPCResult = get_name_puzzle_conditions(
-                block_generator,
-                constants.MAX_BLOCK_COST_CLVM,
-                cost_per_byte=constants.COST_PER_BYTE,
-                mempool_mode=True,
+                block_generator, constants.MAX_BLOCK_COST_CLVM, mempool_mode=True, height=height
             )
             cost = result.cost
 
@@ -172,7 +169,6 @@ def create_foliage(
                 uint64(calculate_base_farmer_reward(curr.height) + curr.fees),
                 constants.GENESIS_CHALLENGE,
             )
-
             community_coin = create_community_coin(
                 curr.height,
                 curr.community_puzzle_hash,
@@ -419,7 +415,7 @@ def create_unfinished_block(
         additions = []
     if removals is None:
         removals = []
-    (foliage, foliage_transaction_block, transactions_info,) = create_foliage(
+    (foliage, foliage_transaction_block, transactions_info) = create_foliage(
         constants,
         rc_block,
         block_generator,

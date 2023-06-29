@@ -1,13 +1,16 @@
+from __future__ import annotations
+
 import dataclasses
-from typing import List, Iterator, Optional
+from typing import Iterator, List, Optional
 
 from blspy import G2Element
 
 from ball.types.blockchain_format.coin import Coin, coin_as_list
-from ball.types.blockchain_format.program import Program, INFINITE_COST
+from ball.types.blockchain_format.program import INFINITE_COST, Program
 from ball.types.blockchain_format.sized_bytes import bytes32
+from ball.types.coin_spend import CoinSpend
 from ball.types.condition_opcodes import ConditionOpcode
-from ball.types.spend_bundle import CoinSpend, SpendBundle
+from ball.types.spend_bundle import SpendBundle
 from ball.util.condition_tools import conditions_dict_for_solution
 from ball.wallet.lineage_proof import LineageProof
 from ball.wallet.puzzles.cat_loader import CAT_MOD
@@ -18,6 +21,13 @@ NULL_SIGNATURE = G2Element()
 ANYONE_CAN_SPEND_PUZZLE = Program.to(1)  # simply return the conditions
 
 
+def empty_program() -> Program:
+    # ignoring hint error here for:
+    # https://github.com/Ball-Network/clvm/pull/102
+    # https://github.com/Ball-Network/clvm/pull/106
+    return Program.to([])  # type: ignore[no-any-return]
+
+
 # information needed to spend a cc
 @dataclasses.dataclass
 class SpendableCAT:
@@ -25,10 +35,10 @@ class SpendableCAT:
     limitations_program_hash: bytes32
     inner_puzzle: Program
     inner_solution: Program
-    limitations_solution: Program = Program.to([])
+    limitations_solution: Program = dataclasses.field(default_factory=empty_program)
     lineage_proof: LineageProof = LineageProof()
     extra_delta: int = 0
-    limitations_program_reveal: Program = Program.to([])
+    limitations_program_reveal: Program = dataclasses.field(default_factory=empty_program)
 
 
 def match_cat_puzzle(puzzle: UncurriedPuzzle) -> Optional[Iterator[Program]]:
@@ -85,7 +95,7 @@ def next_info_for_spendable_cat(spendable_cat: SpendableCAT) -> Program:
     c = spendable_cat.coin
     list = [c.parent_coin_info, spendable_cat.inner_puzzle.get_tree_hash(), c.amount]
     # ignoring hint error here for:
-    # https://github.com/chia-network/clvm/pull/102
+    # https://github.com/Ball-Network/clvm/pull/102
     return Program.to(list)  # type: ignore[no-any-return]
 
 
@@ -101,14 +111,11 @@ def unsigned_spend_bundle_for_spendable_cats(mod_code: Program, spendable_cat_li
     # figure out what the deltas are by running the inner puzzles & solutions
     deltas: List[int] = []
     for spend_info in spendable_cat_list:
-        error, conditions, cost = conditions_dict_for_solution(
-            spend_info.inner_puzzle, spend_info.inner_solution, INFINITE_COST
-        )
+        conditions = conditions_dict_for_solution(spend_info.inner_puzzle, spend_info.inner_solution, INFINITE_COST)
         total = spend_info.extra_delta * -1
-        if conditions:
-            for _ in conditions.get(ConditionOpcode.CREATE_COIN, []):
-                if _.vars[1] != b"\x8f":  # -113 in bytes
-                    total += Program.to(_.vars[1]).as_int()
+        for _ in conditions.get(ConditionOpcode.CREATE_COIN, []):
+            if _.vars[1] != b"\x8f":  # -113 in bytes
+                total += Program.to(_.vars[1]).as_int()
         deltas.append(spend_info.coin.amount - total)
 
     if sum(deltas) != 0:

@@ -1,12 +1,15 @@
-from typing import Any, Iterator, List, Tuple, Optional
+from __future__ import annotations
+
+from typing import Any, Iterator, List, Optional, Tuple
+
 from chiabip158 import PyBIP158
 
+from ball.consensus.cost_calculator import NPCResult
 from ball.types.blockchain_format.coin import Coin
 from ball.types.blockchain_format.sized_bytes import bytes32
 from ball.types.full_block import FullBlock
 from ball.types.header_block import HeaderBlock
 from ball.types.spend_bundle_conditions import SpendBundleConditions
-from ball.consensus.cost_calculator import NPCResult
 from ball.util.ints import uint64
 
 

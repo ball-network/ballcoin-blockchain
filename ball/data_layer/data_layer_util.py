@@ -22,8 +22,8 @@ if TYPE_CHECKING:
 
 def internal_hash(left_hash: bytes32, right_hash: bytes32) -> bytes32:
     # ignoring hint error here for:
-    # https://github.com/ball/clvm/pull/102
-    # https://github.com/ball/clvm/pull/106
+    # https://github.com/Ball-Network/clvm/pull/102
+    # https://github.com/Ball-Network/clvm/pull/106
     return Program.to((left_hash, right_hash)).get_tree_hash_precalc(left_hash, right_hash)  # type: ignore[no-any-return] # noqa: E501
 
 
@@ -38,8 +38,8 @@ def calculate_internal_hash(hash: bytes32, other_hash_side: Side, other_hash: by
 
 def leaf_hash(key: bytes, value: bytes) -> bytes32:
     # ignoring hint error here for:
-    # https://github.com/ball/clvm/pull/102
-    # https://github.com/ball/clvm/pull/106
+    # https://github.com/Ball-Network/clvm/pull/102
+    # https://github.com/Ball-Network/clvm/pull/106
     return Program.to((key, value)).get_tree_hash()  # type: ignore[no-any-return]
 
 
@@ -78,7 +78,7 @@ async def _dot_dump(data_store: DataStore, store_id: bytes32, root_hash: bytes32
         dot_connections.append(f"""node_{hash} -> node_{left} [label="L"];""")
         dot_connections.append(f"""node_{hash} -> node_{right} [label="R"];""")
         dot_pair_boxes.append(
-            f"node [shape = box]; " f"{{rank = same; node_{left}->node_{right}[style=invis]; rankdir = LR}}"
+            f"node [shape = box]; {{rank = same; node_{left}->node_{right}[style=invis]; rankdir = LR}}"
         )
 
     lines = [
@@ -216,8 +216,8 @@ class ProofOfInclusion:
         return [layer.other_hash for layer in self.layers]
 
     def as_program(self) -> Program:
-        # https://github.com/ball/clvm/pull/102
-        # https://github.com/ball/clvm/pull/106
+        # https://github.com/Ball-Network/clvm/pull/102
+        # https://github.com/Ball-Network/clvm/pull/106
         return Program.to([self.sibling_sides_integer(), self.sibling_hashes()])  # type: ignore[no-any-return]
 
     def valid(self) -> bool:
@@ -614,4 +614,26 @@ class CancelOfferResponse:
     def marshal(self) -> Dict[str, Any]:
         return {
             "success": self.success,
+        }
+
+
+@dataclasses.dataclass(frozen=True)
+class SyncStatus:
+    root_hash: bytes32
+    generation: int
+    target_root_hash: bytes32
+    target_generation: int
+
+
+@dataclasses.dataclass(frozen=True)
+class PluginStatus:
+    uploaders: Dict[str, Dict[str, Any]]
+    downloaders: Dict[str, Dict[str, Any]]
+
+    def marshal(self) -> Dict[str, Any]:
+        return {
+            "plugin_status": {
+                "uploaders": self.uploaders,
+                "downloaders": self.downloaders,
+            }
         }

@@ -3,8 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple
 
-from clvm_tools.binutils import disassemble
-
 from ball.types.blockchain_format.coin import Coin
 from ball.types.blockchain_format.program import Program
 from ball.types.blockchain_format.sized_bytes import bytes32
@@ -13,7 +11,7 @@ from ball.wallet.puzzle_drivers import PuzzleInfo, Solver
 from ball.wallet.puzzles.load_clvm import load_clvm_maybe_recompile
 from ball.wallet.uncurried_puzzle import UncurriedPuzzle, uncurry_puzzle
 
-NFT_STATE_LAYER_MOD = load_clvm_maybe_recompile("nft_state_layer.clvm")
+NFT_STATE_LAYER_MOD = load_clvm_maybe_recompile("nft_state_layer.clsp")
 NFT_STATE_LAYER_MOD_HASH = NFT_STATE_LAYER_MOD.get_tree_hash()
 
 
@@ -45,8 +43,8 @@ class MetadataOuterPuzzle:
             _, metadata, updater_hash, inner_puzzle = curried_args
             constructor_dict = {
                 "type": "metadata",
-                "metadata": disassemble(metadata),  # type: ignore
-                "updater_hash": "0x" + updater_hash.as_python().hex(),
+                "metadata": metadata,
+                "updater_hash": "0x" + updater_hash.as_atom().hex(),
             }
             next_constructor = self._match(uncurry_puzzle(inner_puzzle))
             if next_constructor is not None:

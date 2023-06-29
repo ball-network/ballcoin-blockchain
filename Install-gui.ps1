@@ -34,9 +34,10 @@ try {
     npm ci --loglevel=error
     npm audit fix
     npm run build
+    py ..\installhelper.py
 
     Write-Output ""
-    Write-Output "Ball blockchain Install-gui.ps1 completed."
+    Write-Output "BallCoin Blockchain Install-gui.ps1 completed."
     Write-Output ""
     Write-Output "Type 'cd ballcoin-blockchain-gui' and then 'npm run electron' to start the GUI."
 } finally {

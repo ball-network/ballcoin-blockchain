@@ -11,7 +11,7 @@ from ball.wallet.puzzle_drivers import PuzzleInfo, Solver
 from ball.wallet.puzzles.load_clvm import load_clvm_maybe_recompile
 from ball.wallet.uncurried_puzzle import UncurriedPuzzle, uncurry_puzzle
 
-OWNERSHIP_LAYER_MOD = load_clvm_maybe_recompile("nft_ownership_layer.clvm")
+OWNERSHIP_LAYER_MOD = load_clvm_maybe_recompile("nft_ownership_layer.clsp")
 
 
 def match_ownership_layer_puzzle(puzzle: UncurriedPuzzle) -> Tuple[bool, List[Program]]:
@@ -47,9 +47,7 @@ class OwnershipOuterPuzzle:
             constructor_dict = {
                 "type": "ownership",
                 "owner": "()" if owner_bytes == b"" else "0x" + owner_bytes.hex(),
-                "transfer_program": (
-                    disassemble(transfer_program) if tp_match is None else tp_match.info  # type: ignore
-                ),
+                "transfer_program": (disassemble(transfer_program) if tp_match is None else tp_match.info),
             }
             next_constructor = self._match(uncurry_puzzle(inner_puzzle))
             if next_constructor is not None:

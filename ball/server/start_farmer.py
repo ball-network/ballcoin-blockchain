@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pathlib
 import sys
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from ball.consensus.constants import ConsensusConstants
 from ball.consensus.default_constants import DEFAULT_CONSTANTS
@@ -11,7 +11,7 @@ from ball.farmer.farmer_api import FarmerAPI
 from ball.rpc.farmer_rpc_api import FarmerRpcApi
 from ball.server.outbound_message import NodeType
 from ball.server.start_service import RpcInfo, Service, async_run
-from ball.types.peer_info import PeerInfo
+from ball.types.peer_info import UnresolvedPeerInfo
 from ball.util.ball_logging import initialize_service_logging
 from ball.util.config import load_config, load_config_cli
 from ball.util.default_root import DEFAULT_ROOT_PATH
@@ -25,18 +25,16 @@ SERVICE_NAME = "farmer"
 
 def create_farmer_service(
     root_path: pathlib.Path,
-    config: Dict,
-    config_pool: Dict,
+    config: Dict[str, Any],
+    config_pool: Dict[str, Any],
     consensus_constants: ConsensusConstants,
     keychain: Optional[Keychain] = None,
     connect_to_daemon: bool = True,
 ) -> Service[Farmer]:
     service_config = config[SERVICE_NAME]
 
-    connect_peers = []
     fnp = service_config.get("full_node_peer")
-    if fnp is not None:
-        connect_peers.append(PeerInfo(fnp["host"], fnp["port"]))
+    connect_peers = set() if fnp is None else {UnresolvedPeerInfo(fnp["host"], fnp["port"])}
 
     overrides = service_config["network_overrides"]["constants"][service_config["selected_network"]]
     updated_constants = consensus_constants.replace_str_to_bytes(**overrides)
@@ -57,7 +55,6 @@ def create_farmer_service(
         node_type=NodeType.FARMER,
         advertised_port=service_config["port"],
         service_name=SERVICE_NAME,
-        server_listen_ports=[service_config["port"]],
         connect_peers=connect_peers,
         on_connect_callback=farmer.on_connect,
         network_id=network_id,

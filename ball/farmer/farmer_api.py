@@ -8,10 +8,11 @@ from typing import Any, Dict, List, Optional, Tuple
 import aiohttp
 from blspy import AugSchemeMPL, G2Element, PrivateKey
 
-import ball.server.ws_connection as ws
 from ball import __version__
 from ball.consensus.pot_iterations import calculate_iterations_quality, calculate_sp_interval_iters
 from ball.farmer.farmer import Farmer
+from ball.full_node.full_node_api import FullNodeAPI
+from ball.harvester.harvester_api import HarvesterAPI
 from ball.protocols import farmer_protocol, harvester_protocol
 from ball.protocols.harvester_protocol import (
     PlotSyncDone,
@@ -29,10 +30,15 @@ from ball.protocols.pool_protocol import (
 from ball.protocols.protocol_message_types import ProtocolMessageTypes
 from ball.server.outbound_message import NodeType, make_msg
 from ball.server.server import ssl_context_for_root
+from ball.server.ws_connection import WSBallConnection
 from ball.ssl.create_ssl import get_mozilla_ca_crt
 from ball.types.blockchain_format.pool_target import PoolTarget
-from ball.types.blockchain_format.proof_of_space import ProofOfSpace
-from ball.util.api_decorators import api_request, peer_required
+from ball.types.blockchain_format.proof_of_space import (
+    generate_plot_public_key,
+    generate_taproot_sk,
+    verify_and_get_quality_string,
+)
+from ball.util.api_decorators import api_request
 from ball.util.ints import uint32, uint64
 
 
@@ -52,11 +58,8 @@ class FarmerAPI:
     def __init__(self, farmer) -> None:
         self.farmer = farmer
 
-    @api_request
-    @peer_required
-    async def new_proof_of_space(
-        self, new_proof_of_space: harvester_protocol.NewProofOfSpace, peer: ws.WSBallConnection
-    ):
+    @api_request(peer_required=True)
+    async def new_proof_of_space(self, new_proof_of_space: harvester_protocol.NewProofOfSpace, peer: WSBallConnection):
         """
         This is a response from the harvester, for a NewChallenge. Here we check if the proof
         of space is sufficiently good, and if so, we ask for the whole proof.
@@ -81,10 +84,12 @@ class FarmerAPI:
                 f"Received response for a signage point that we do not have {new_proof_of_space.sp_hash}"
             )
             return None
-
+        difficulty_coefficient = Decimal(new_proof_of_space.difficulty_coefficient)
+        pool_coefficient = Decimal(1)
         sps = self.farmer.sps[new_proof_of_space.sp_hash]
         for sp in sps:
-            computed_quality_string = new_proof_of_space.proof.verify_and_get_quality_string(
+            computed_quality_string = verify_and_get_quality_string(
+                new_proof_of_space.proof,
                 self.farmer.constants,
                 new_proof_of_space.challenge_hash,
                 new_proof_of_space.sp_hash,
@@ -101,7 +106,7 @@ class FarmerAPI:
                 new_proof_of_space.proof.size,
                 sp.difficulty,
                 new_proof_of_space.sp_hash,
-                Decimal(new_proof_of_space.difficulty_coefficient),
+                difficulty_coefficient,
             )
 
             # If the iters are good enough to make a block, proceed with the block making flow
@@ -158,7 +163,7 @@ class FarmerAPI:
                     new_proof_of_space.proof.size,
                     pool_state_dict["current_difficulty"],
                     new_proof_of_space.sp_hash,
-                    Decimal(1),  # FIXME handle stakings in pool protocol
+                    pool_coefficient,  # FIXME handle staking in pool protocol
                 )
                 if required_iters >= calculate_sp_interval_iters(
                     self.farmer.constants, self.farmer.constants.POOL_SUB_SLOT_ITERS
@@ -196,7 +201,7 @@ class FarmerAPI:
                     new_proof_of_space.sp_hash,
                     [m_to_sign],
                 )
-                response: Any = await peer.request_signatures(request)
+                response: Any = await peer.call_api(HarvesterAPI.request_signatures, request)
                 if not isinstance(response, harvester_protocol.RespondSignatures):
                     self.farmer.log.error(f"Invalid response from harvester: {response}")
                     return
@@ -207,10 +212,10 @@ class FarmerAPI:
                 for sk in self.farmer.get_private_keys():
                     pk = sk.get_g1()
                     if pk == response.farmer_pk:
-                        agg_pk = ProofOfSpace.generate_plot_public_key(response.local_pk, pk, True)
+                        agg_pk = generate_plot_public_key(response.local_pk, pk, True)
                         assert agg_pk == new_proof_of_space.proof.plot_public_key
                         sig_farmer = AugSchemeMPL.sign(sk, m_to_sign, agg_pk)
-                        taproot_sk: PrivateKey = ProofOfSpace.generate_taproot_sk(response.local_pk, pk)
+                        taproot_sk: PrivateKey = generate_taproot_sk(response.local_pk, pk)
                         taproot_sig: G2Element = AugSchemeMPL.sign(taproot_sk, m_to_sign, agg_pk)
 
                         plot_signature = AugSchemeMPL.aggregate(
@@ -244,7 +249,7 @@ class FarmerAPI:
                             f"{pool_url}/partial",
                             json=post_partial_request.to_json_dict(),
                             ssl=ssl_context_for_root(get_mozilla_ca_crt(), log=self.farmer.log),
-                            headers={"User-Agent": f"Ball Blockchain v.{__version__}"},
+                            headers={"User-Agent": f"BallCoin Blockchain v.{__version__}"},
                         ) as resp:
                             if resp.ok:
                                 pool_response: Dict = json.loads(await resp.text())
@@ -286,7 +291,7 @@ class FarmerAPI:
 
                 return
 
-    @api_request
+    @api_request()
     async def respond_signatures(self, response: harvester_protocol.RespondSignatures):
         """
         There are two cases: receiving signatures for sps, or receiving signatures for the block.
@@ -313,8 +318,8 @@ class FarmerAPI:
         assert pospace is not None
         include_taproot: bool = pospace.pool_contract_puzzle_hash is not None
 
-        computed_quality_string = pospace.verify_and_get_quality_string(
-            self.farmer.constants, response.challenge_hash, response.sp_hash
+        computed_quality_string = verify_and_get_quality_string(
+            pospace, self.farmer.constants, response.challenge_hash, response.sp_hash
         )
         if computed_quality_string is None:
             self.farmer.log.warning(f"Have invalid PoSpace {pospace}")
@@ -329,10 +334,10 @@ class FarmerAPI:
             for sk in self.farmer.get_private_keys():
                 pk = sk.get_g1()
                 if pk == response.farmer_pk:
-                    agg_pk = ProofOfSpace.generate_plot_public_key(response.local_pk, pk, include_taproot)
+                    agg_pk = generate_plot_public_key(response.local_pk, pk, include_taproot)
                     assert agg_pk == pospace.plot_public_key
                     if include_taproot:
-                        taproot_sk: PrivateKey = ProofOfSpace.generate_taproot_sk(response.local_pk, pk)
+                        taproot_sk: PrivateKey = generate_taproot_sk(response.local_pk, pk)
                         taproot_share_cc_sp: G2Element = AugSchemeMPL.sign(taproot_sk, challenge_chain_sp, agg_pk)
                         taproot_share_rc_sp: G2Element = AugSchemeMPL.sign(taproot_sk, reward_chain_sp, agg_pk)
                     else:
@@ -381,6 +386,7 @@ class FarmerAPI:
                         self.farmer.farmer_target,
                         pool_target,
                         pool_target_signature,
+                        response.difficulty_coefficient
                     )
                     self.farmer.state_changed("proof", {"proof": request, "passed_filter": True})
                     msg = make_msg(ProtocolMessageTypes.declare_proof_of_space, request)
@@ -400,10 +406,10 @@ class FarmerAPI:
                 ) = response.message_signatures[1]
                 pk = sk.get_g1()
                 if pk == response.farmer_pk:
-                    agg_pk = ProofOfSpace.generate_plot_public_key(response.local_pk, pk, include_taproot)
+                    agg_pk = generate_plot_public_key(response.local_pk, pk, include_taproot)
                     assert agg_pk == pospace.plot_public_key
                     if include_taproot:
-                        taproot_sk = ProofOfSpace.generate_taproot_sk(response.local_pk, pk)
+                        taproot_sk = generate_taproot_sk(response.local_pk, pk)
                         foliage_sig_taproot: G2Element = AugSchemeMPL.sign(taproot_sk, foliage_block_data_hash, agg_pk)
                         foliage_transaction_block_sig_taproot: G2Element = AugSchemeMPL.sign(
                             taproot_sk, foliage_transaction_block_hash, agg_pk
@@ -441,9 +447,8 @@ class FarmerAPI:
     FARMER PROTOCOL (FARMER <-> FULL NODE)
     """
 
-    @peer_required
-    @api_request
-    async def new_signage_point(self, new_signage_point: farmer_protocol.NewSignagePoint, peer: ws.WSBallConnection):
+    @api_request(peer_required=True)
+    async def new_signage_point(self, new_signage_point: farmer_protocol.NewSignagePoint, peer: WSBallConnection):
         try:
             pool_difficulties: List[PoolDifficulty] = []
             for p2_singleton_puzzle_hash, pool_dict in self.farmer.pool_state.items():
@@ -465,10 +470,13 @@ class FarmerAPI:
                         p2_singleton_puzzle_hash,
                     )
                 )
+
             # staking
-            rsp: Optional[farmer_protocol.FarmerStakings] = await peer.request_stakings(
-                farmer_protocol.RequestStakings(public_keys=self.farmer.get_public_keys(), height=None, blocks=None)
+            request = farmer_protocol.RequestStakings(
+                public_keys=self.farmer.get_public_keys(),
             )
+            response: Any = await peer.call_api(FullNodeAPI.request_stakings, request)
+
             message = harvester_protocol.NewSignagePointHarvester(
                 new_signage_point.challenge_hash,
                 new_signage_point.difficulty,
@@ -477,7 +485,7 @@ class FarmerAPI:
                 new_signage_point.challenge_chain_sp,
                 new_signage_point.timelord_fee_puzzle_hash,
                 pool_difficulties,
-                rsp.stakings,
+                response.stakings,
             )
 
             msg = make_msg(ProtocolMessageTypes.new_signage_point_harvester, message)
@@ -504,7 +512,7 @@ class FarmerAPI:
         self.farmer.cache_add_time[new_signage_point.challenge_chain_sp] = uint64(int(time.time()))
         self.farmer.state_changed("new_signage_point", {"sp_hash": new_signage_point.challenge_chain_sp})
 
-    @api_request
+    @api_request()
     async def request_signed_values(self, full_node_request: farmer_protocol.RequestSignedValues):
         if full_node_request.quality_string not in self.farmer.quality_str_to_identifiers:
             self.farmer.log.error(f"Do not have quality string {full_node_request.quality_string}")
@@ -523,7 +531,7 @@ class FarmerAPI:
         msg = make_msg(ProtocolMessageTypes.request_signatures, request)
         await self.farmer.server.send_to_specific([msg], node_id)
 
-    @api_request
+    @api_request()
     async def farming_info(self, request: farmer_protocol.FarmingInfo):
         self.farmer.state_changed(
             "new_farming_info",
@@ -539,47 +547,39 @@ class FarmerAPI:
             },
         )
 
-    @api_request
-    @peer_required
-    async def respond_plots(self, _: harvester_protocol.RespondPlots, peer: ws.WSBallConnection):
+    @api_request(peer_required=True)
+    async def respond_plots(self, _: harvester_protocol.RespondPlots, peer: WSBallConnection):
         self.farmer.log.warning(f"Respond plots came too late from: {peer.get_peer_logging()}")
 
-    @api_request
-    @peer_required
-    async def plot_sync_start(self, message: PlotSyncStart, peer: ws.WSBallConnection):
+    @api_request(peer_required=True)
+    async def plot_sync_start(self, message: PlotSyncStart, peer: WSBallConnection):
         await self.farmer.plot_sync_receivers[peer.peer_node_id].sync_started(message)
 
-    @api_request
-    @peer_required
-    async def plot_sync_loaded(self, message: PlotSyncPlotList, peer: ws.WSBallConnection):
+    @api_request(peer_required=True)
+    async def plot_sync_loaded(self, message: PlotSyncPlotList, peer: WSBallConnection):
         await self.farmer.plot_sync_receivers[peer.peer_node_id].process_loaded(message)
 
-    @api_request
-    @peer_required
-    async def plot_sync_removed(self, message: PlotSyncPathList, peer: ws.WSBallConnection):
+    @api_request(peer_required=True)
+    async def plot_sync_removed(self, message: PlotSyncPathList, peer: WSBallConnection):
         await self.farmer.plot_sync_receivers[peer.peer_node_id].process_removed(message)
 
-    @api_request
-    @peer_required
-    async def plot_sync_invalid(self, message: PlotSyncPathList, peer: ws.WSBallConnection):
+    @api_request(peer_required=True)
+    async def plot_sync_invalid(self, message: PlotSyncPathList, peer: WSBallConnection):
         await self.farmer.plot_sync_receivers[peer.peer_node_id].process_invalid(message)
 
-    @api_request
-    @peer_required
-    async def plot_sync_keys_missing(self, message: PlotSyncPathList, peer: ws.WSBallConnection):
+    @api_request(peer_required=True)
+    async def plot_sync_keys_missing(self, message: PlotSyncPathList, peer: WSBallConnection):
         await self.farmer.plot_sync_receivers[peer.peer_node_id].process_keys_missing(message)
 
-    @api_request
-    @peer_required
-    async def plot_sync_duplicates(self, message: PlotSyncPathList, peer: ws.WSBallConnection):
+    @api_request(peer_required=True)
+    async def plot_sync_duplicates(self, message: PlotSyncPathList, peer: WSBallConnection):
         await self.farmer.plot_sync_receivers[peer.peer_node_id].process_duplicates(message)
 
-    @api_request
-    @peer_required
-    async def plot_sync_done(self, message: PlotSyncDone, peer: ws.WSBallConnection):
+    @api_request(peer_required=True)
+    async def plot_sync_done(self, message: PlotSyncDone, peer: WSBallConnection):
         await self.farmer.plot_sync_receivers[peer.peer_node_id].sync_done(message)
 
     # staking
-    @api_request
-    async def respond_stakings(self, response: farmer_protocol.FarmerStakings):
+    @api_request()
+    async def respond_stakings(self, request: farmer_protocol.FarmerStakings):
         self.farmer.log.warning("Respond staking came too late")

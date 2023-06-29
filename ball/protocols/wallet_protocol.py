@@ -7,7 +7,7 @@ from chia_rs import CoinState, RespondToPhUpdates
 
 from ball.full_node.fee_estimate import FeeEstimateGroup
 from ball.types.blockchain_format.coin import Coin
-from ball.types.blockchain_format.program import SerializedProgram
+from ball.types.blockchain_format.serialized_program import SerializedProgram
 from ball.types.blockchain_format.sized_bytes import bytes32
 from ball.types.header_block import HeaderBlock
 from ball.types.spend_bundle import SpendBundle

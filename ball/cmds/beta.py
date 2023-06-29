@@ -142,7 +142,7 @@ def prepare_submission_cmd(ctx: click.Context) -> None:
     except IndexError:
         raise click.ClickException(f"Invalid choice: {user_input}")
     plotting_path = Path(prepare_result / "plotting")
-    ball_blockchain_path = Path(prepare_result / "ball-blockchain")
+    ball_blockchain_path = Path(prepare_result / "ballcoin-blockchain")
     ball_logs = prepare_logs(plotting_path, prepare_ball_blockchain_log)
     plotting_logs = prepare_logs(ball_blockchain_path, prepare_plotting_log)
 

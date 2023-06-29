@@ -1,26 +1,27 @@
 from __future__ import annotations
 
+import enum
 import os
 import random
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Tuple, Union
+from typing import Any, Generic, Optional, Tuple, Type, TypeVar, Union
 
 import aiosqlite
 import click
 from blspy import AugSchemeMPL, G1Element, G2Element
 
-from ball.consensus.coinbase import create_farmer_coin, create_pool_coin
+from ball.consensus.coinbase import create_farmer_coin, create_pool_coin, create_community_coin, create_timelord_coin
 from ball.consensus.default_constants import DEFAULT_CONSTANTS
 from ball.types.blockchain_format.classgroup import ClassgroupElement
 from ball.types.blockchain_format.coin import Coin
 from ball.types.blockchain_format.foliage import Foliage, FoliageBlockData, FoliageTransactionBlock, TransactionsInfo
 from ball.types.blockchain_format.pool_target import PoolTarget
-from ball.types.blockchain_format.program import SerializedProgram
 from ball.types.blockchain_format.proof_of_space import ProofOfSpace
 from ball.types.blockchain_format.reward_chain_block import RewardChainBlock
+from ball.types.blockchain_format.serialized_program import SerializedProgram
 from ball.types.blockchain_format.sized_bytes import bytes32, bytes100
 from ball.types.blockchain_format.vdf import VDFInfo, VDFProof
 from ball.types.full_block import FullBlock
@@ -34,24 +35,29 @@ with open(Path(os.path.realpath(__file__)).parent / "clvm_generator.bin", "rb") 
     clvm_generator = f.read()
 
 
+_T_Enum = TypeVar("_T_Enum", bound=enum.Enum)
+
+
 # Workaround to allow `Enum` with click.Choice: https://github.com/pallets/click/issues/605#issuecomment-901099036
-class EnumType(click.Choice):
-    def __init__(self, enum, case_sensitive=False):
+class EnumType(click.Choice, Generic[_T_Enum]):
+    def __init__(self, enum: Type[_T_Enum], case_sensitive: bool = False) -> None:
         self.__enum = enum
         super().__init__(choices=[item.value for item in enum], case_sensitive=case_sensitive)
 
-    def convert(self, value, param, ctx):
+    def convert(self, value: Any, param: Optional[click.Parameter], ctx: Optional[click.Context]) -> _T_Enum:
         converted_str = super().convert(value, param, ctx)
         return self.__enum(converted_str)
 
 
-def rewards(height: uint32) -> Tuple[Coin, Coin]:
-    farmer_coin = create_farmer_coin(height, ph, uint64(250000000), DEFAULT_CONSTANTS.GENESIS_CHALLENGE)
-    pool_coin = create_pool_coin(height, ph, uint64(1750000000), DEFAULT_CONSTANTS.GENESIS_CHALLENGE)
-    return farmer_coin, pool_coin
+def rewards(height: uint32) -> Tuple[Coin, Coin, Coin, Coin]:
+    farmer_coin = create_farmer_coin(height, ph, uint64(25000000000), DEFAULT_CONSTANTS.GENESIS_CHALLENGE)
+    pool_coin = create_pool_coin(height, ph, uint64(175000000000), DEFAULT_CONSTANTS.GENESIS_CHALLENGE)
+    community_coin = create_community_coin(height, ph, uint64(12000000000), DEFAULT_CONSTANTS.GENESIS_CHALLENGE)
+    timelord_coin = create_timelord_coin(height, ph, uint64(4000000000), DEFAULT_CONSTANTS.GENESIS_CHALLENGE)
+    return farmer_coin, pool_coin, community_coin, timelord_coin
 
 
-def rand_bytes(num) -> bytes:
+def rand_bytes(num: int) -> bytes:
     ret = bytearray(num)
     for i in range(num):
         ret[i] = random.getrandbits(8)
@@ -96,6 +102,7 @@ def rand_full_block() -> FullBlock:
         rand_g1(),
         uint8(0),
         rand_bytes(8 * 32),
+        rand_g1(),
     )
 
     reward_chain_block = RewardChainBlock(
@@ -126,6 +133,8 @@ def rand_full_block() -> FullBlock:
         rand_g2(),
         rand_hash(),
         rand_hash(),
+        rand_hash(),
+        rand_hash(),
     )
 
     foliage = Foliage(
@@ -146,7 +155,7 @@ def rand_full_block() -> FullBlock:
         rand_hash(),
     )
 
-    farmer_coin, pool_coin = rewards(uint32(0))
+    farmer_coin, pool_coin, community_coin, timelord_coin = rewards(uint32(0))
 
     transactions_info = TransactionsInfo(
         rand_hash(),
@@ -154,7 +163,7 @@ def rand_full_block() -> FullBlock:
         rand_g2(),
         uint64(0),
         uint64(1),
-        [farmer_coin, pool_coin],
+        [farmer_coin, pool_coin, community_coin, timelord_coin],
     )
 
     full_block = FullBlock(
@@ -175,7 +184,7 @@ def rand_full_block() -> FullBlock:
     return full_block
 
 
-async def setup_db(name: Union[str, os.PathLike], db_version: int) -> DBWrapper2:
+async def setup_db(name: Union[str, os.PathLike[str]], db_version: int) -> DBWrapper2:
     db_filename = Path(name)
     try:
         os.unlink(db_filename)
@@ -183,7 +192,7 @@ async def setup_db(name: Union[str, os.PathLike], db_version: int) -> DBWrapper2
         pass
     connection = await aiosqlite.connect(db_filename)
 
-    def sql_trace_callback(req: str):
+    def sql_trace_callback(req: str) -> None:
         sql_log_path = "sql.log"
         timestamp = datetime.now().strftime("%H:%M:%S.%f")
         log = open(sql_log_path, "a")

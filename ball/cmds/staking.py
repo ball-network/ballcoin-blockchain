@@ -25,9 +25,9 @@ def staking_info(
     fingerprint: int,
 ) -> None:
     import asyncio
-    from .wallet_funcs import staking_info
+    from .staking_funcs import info
 
-    asyncio.run(execute_with_wallet(wallet_rpc_port, fingerprint, {}, staking_info))
+    asyncio.run(execute_with_wallet(wallet_rpc_port, fingerprint, {}, info))
 
 
 @staking_cmd.command("send", short_help="Send ball to staking address")
@@ -49,9 +49,9 @@ def staking_send_cmd(
         "amount": amount,
     }
     import asyncio
-    from .wallet_funcs import staking_send
+    from .staking_funcs import send
 
-    asyncio.run(execute_with_wallet(wallet_rpc_port, fingerprint, extra_params, staking_send))
+    asyncio.run(execute_with_wallet(wallet_rpc_port, fingerprint, extra_params, send))
 
 
 @staking_cmd.command("withdraw", short_help="Withdraw staking ball")
@@ -83,6 +83,6 @@ def staking_withdraw_cmd(
         "address": address,
     }
     import asyncio
-    from .wallet_funcs import staking_withdraw
+    from .staking_funcs import withdraw
 
-    asyncio.run(execute_with_wallet(wallet_rpc_port, fingerprint, extra_params, staking_withdraw))
+    asyncio.run(execute_with_wallet(wallet_rpc_port, fingerprint, extra_params, withdraw))

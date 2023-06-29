@@ -24,6 +24,7 @@ from ball.consensus.pot_iterations import (
 )
 from ball.consensus.vdf_info_computation import get_signage_point_vdf_info
 from ball.types.blockchain_format.classgroup import ClassgroupElement
+from ball.types.blockchain_format.proof_of_space import verify_and_get_quality_string
 from ball.types.blockchain_format.sized_bytes import bytes32
 from ball.types.blockchain_format.slots import ChallengeChainSubSlot, RewardChainSubSlot, SubSlotProofs
 from ball.types.blockchain_format.vdf import VDFInfo, VDFProof
@@ -486,8 +487,8 @@ def validate_unfinished_header_block(
     else:
         cc_sp_hash = header_block.reward_chain_block.challenge_chain_sp_vdf.output.get_hash()
 
-    q_str: Optional[bytes32] = header_block.reward_chain_block.proof_of_space.verify_and_get_quality_string(
-        constants, challenge, cc_sp_hash
+    q_str: Optional[bytes32] = verify_and_get_quality_string(
+        header_block.reward_chain_block.proof_of_space, constants, challenge, cc_sp_hash
     )
     if q_str is None:
         return None, ValidationError(Err.INVALID_POSPACE)
@@ -509,7 +510,7 @@ def validate_unfinished_header_block(
 
     # 7. check required iters
     if required_iters >= calculate_sp_interval_iters(constants, expected_sub_slot_iters):
-        log.info(f"height {height} difficulty_coefficient {difficulty_coefficient} error")
+        log.info(f"height {height} difficulty_coefficient {difficulty_coefficient} INVALID_REQUIRED_ITERS")
         return None, ValidationError(Err.INVALID_REQUIRED_ITERS)
 
     # 8a. check signage point index 0 has no cc sp
@@ -824,7 +825,11 @@ def validate_unfinished_header_block(
                 return None, ValidationError(Err.INVALID_TRANSACTIONS_FILTER_HASH)
 
         # 26a. The timestamp in Foliage Block must not be over 5 minutes in the future
-        if header_block.foliage_transaction_block.timestamp > int(time.time() + constants.MAX_FUTURE_TIME):
+        if height >= constants.SOFT_FORK2_HEIGHT:
+            max_future_time = constants.MAX_FUTURE_TIME2
+        else:
+            max_future_time = constants.MAX_FUTURE_TIME
+        if header_block.foliage_transaction_block.timestamp > int(time.time() + max_future_time):
             return None, ValidationError(Err.TIMESTAMP_TOO_FAR_IN_FUTURE)
 
         if prev_b is not None:
@@ -905,7 +910,7 @@ def validate_finished_header_block(
         # 27b. Check genesis block height, weight, and prev block hash
         if header_block.height != uint32(0):
             return None, ValidationError(Err.INVALID_HEIGHT)
-        if header_block.weight != constants.DIFFICULTY_STARTING:
+        if header_block.weight != uint128(constants.DIFFICULTY_STARTING):
             return None, ValidationError(Err.INVALID_WEIGHT)
         if header_block.prev_header_hash != constants.GENESIS_CHALLENGE:
             return None, ValidationError(Err.INVALID_PREV_BLOCK_HASH)

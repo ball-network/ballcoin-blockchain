@@ -5,6 +5,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Collection, Dict, List, Optional
 
+from blspy import G1Element
 from typing_extensions import Protocol
 
 from ball.consensus.coinbase import create_puzzlehash_for_pk
@@ -28,7 +29,9 @@ from ball.protocols.harvester_protocol import (
     PlotSyncResponse,
     PlotSyncStart,
 )
-from ball.server.ws_connection import ProtocolMessageTypes, WSBallConnection, make_msg
+from ball.protocols.protocol_message_types import ProtocolMessageTypes
+from ball.server.outbound_message import make_msg
+from ball.server.ws_connection import WSBallConnection
 from ball.types.blockchain_format.sized_bytes import bytes32
 from ball.util.ints import int16, uint32, uint64
 from ball.util.misc import get_list_or_len
@@ -205,16 +208,22 @@ class Receiver:
 
     async def _process_loaded(self, plot_infos: PlotSyncPlotList) -> None:
         self._validate_identifier(plot_infos.identifier)
-
+        puzzleHash: Dict[bytes, str] = {}
         for plot_info in plot_infos.data:
             if plot_info.filename in self._plots or plot_info.filename in self._current_sync.delta.valid.additions:
                 raise PlotAlreadyAvailableError(State.loaded, plot_info.filename)
             self._current_sync.delta.valid.additions[plot_info.filename] = plot_info
-            ph = create_puzzlehash_for_pk(plot_info.farmer_public_key).hex()
+
+            farmer_public_key = bytes(plot_info.farmer_public_key)
+            ph: Optional[str] = puzzleHash.get(farmer_public_key)
+            if ph is None:
+                ph = create_puzzlehash_for_pk(plot_info.farmer_public_key).hex()
+                puzzleHash[farmer_public_key] = ph
             if ph not in self._staking_ph:
                 self._staking_ph[ph] = 1
             else:
                 self._staking_ph[ph] += 1
+
             self._current_sync.bump_plots_processed()
 
         # Let the callback receiver know about the sync progress updates
@@ -356,8 +365,8 @@ class Receiver:
         return {
             "connection": {
                 "node_id": self._connection.peer_node_id,
-                "host": self._connection.peer_host,
-                "port": self._connection.peer_port,
+                "host": self._connection.peer_info.host,
+                "port": self._connection.peer_info.port,
             },
             "plots": get_list_or_len(list(self._plots.values()), counts_only),
             "failed_to_open_filenames": get_list_or_len(self._invalid, counts_only),

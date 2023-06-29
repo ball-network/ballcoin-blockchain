@@ -75,17 +75,17 @@ cd ../../../build_scripts || exit 1
 mkdir final_installer
 DMG_NAME="ball-${BALL_INSTALLER_VERSION}.dmg"
 if [ "$(arch)" = "arm64" ]; then
-  mv dist/${DMG_NAME} dist/ball-${BALL_INSTALLER_VERSION}-arm64.dmg
+  mv dist/"${DMG_NAME}" dist/ball-"${BALL_INSTALLER_VERSION}"-arm64.dmg
   DMG_NAME=ball-${BALL_INSTALLER_VERSION}-arm64.dmg
 fi
-mv dist/$DMG_NAME final_installer/
+mv dist/"$DMG_NAME" final_installer/
 
 ls -lh final_installer
 
 if [ "$NOTARIZE" == true ]; then
 	echo "Notarize $DMG_NAME on ci"
 	cd final_installer || exit 1
-  notarize-cli --file="$DMG_NAME" --bundle-id net.ball.blockchain \
+  notarize-cli --file="$DMG_NAME" --bundle-id top.ballcoin.blockchain \
 	--username "$APPLE_NOTARIZE_USERNAME" --password "$APPLE_NOTARIZE_PASSWORD"
   echo "Notarization step complete"
 else
@@ -96,7 +96,7 @@ fi
 #
 # Ask for username and password. password should be an app specific password.
 # Generate app specific password https://support.apple.com/en-us/HT204397
-# xcrun altool --notarize-app -f Ball-0.1.X.dmg --primary-bundle-id net.ball.blockchain -u username -p password
+# xcrun altool --notarize-app -f Ball-0.1.X.dmg --primary-bundle-id top.ballcoin.blockchain -u username -p password
 # xcrun altool --notarize-app; -should return REQUEST-ID, use it in next command
 #
 # Wait until following command return a success message".

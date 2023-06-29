@@ -1,15 +1,19 @@
+from __future__ import annotations
+
 import logging
+from dataclasses import dataclass
 from decimal import Decimal
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-from ball.util.ints import uint32, uint104
+
+import aiofiles
+
 from ball.types.blockchain_format.sized_bytes import bytes32
 from ball.types.blockchain_format.sub_epoch_summary import SubEpochSummary
-from pathlib import Path
-import aiofiles
-from dataclasses import dataclass
-from ball.util.streamable import Streamable, streamable
-from ball.util.files import write_file_async
 from ball.util.db_wrapper import DBWrapper2
+from ball.util.files import write_file_async
+from ball.util.ints import uint32, uint104
+from ball.util.streamable import Streamable, streamable
 
 log = logging.getLogger(__name__)
 
@@ -81,9 +85,6 @@ class BlockHeightMap:
         except Exception:
             # it's OK if this file doesn't exist, we can rebuild it
             pass
-        #
-        # for height, coefficient in self.__height_to_coefficient.items():
-        #     log.info(f"height {height} coefficient {coefficient}")
 
         async with self.db.reader_no_transaction() as conn:
             if db.db_version == 2:
@@ -93,15 +94,15 @@ class BlockHeightMap:
                         return self
 
                 async with conn.execute(
-                        "SELECT header_hash,prev_hash,height,sub_epoch_summary FROM full_blocks WHERE header_hash=?",
-                        (peak_row[0],),
+                    "SELECT header_hash,prev_hash,height,sub_epoch_summary FROM full_blocks WHERE header_hash=?",
+                    (peak_row[0],),
                 ) as cursor:
                     row = await cursor.fetchone()
                     if row is None:
                         return self
             else:
                 async with await conn.execute(
-                        "SELECT header_hash,prev_hash,height,sub_epoch_summary from block_records WHERE is_peak=1"
+                    "SELECT header_hash,prev_hash,height,sub_epoch_summary from block_records WHERE is_peak=1"
                 ) as cursor:
                     row = await cursor.fetchone()
                     if row is None:
@@ -181,7 +182,6 @@ class BlockHeightMap:
     # time until we hit a match in the existing map, at which point we can
     # assume all previous blocks have already been populated
     async def _load_blocks_from(self, height: uint32, prev_hash: bytes32) -> None:
-
         while height > 0:
             # load 5000 blocks at a time
             window_end = max(0, height - 5000)
@@ -199,7 +199,6 @@ class BlockHeightMap:
 
             async with self.db.reader_no_transaction() as conn:
                 async with conn.execute(query, (window_end, height)) as cursor:
-
                     # maps block-hash -> (height, prev-hash, sub-epoch-summary)
                     ordered: Dict[bytes32, Tuple[uint32, bytes32, Optional[bytes]]] = {}
 
@@ -219,11 +218,10 @@ class BlockHeightMap:
                 assert height == entry[0] + 1
                 height = entry[0]
                 if entry[2] is not None:
-
                     if (
-                            self.get_hash(height) == prev_hash
-                            and height in self.__sub_epoch_summaries
-                            and self.__sub_epoch_summaries[height] == entry[2]
+                        self.get_hash(height) == prev_hash
+                        and height in self.__sub_epoch_summaries
+                        and self.__sub_epoch_summaries[height] == entry[2]
                     ):
                         return
                     self.__sub_epoch_summaries[height] = entry[2]
@@ -237,8 +235,16 @@ class BlockHeightMap:
 
     def __set_hash(self, height: int, block_hash: bytes32) -> None:
         idx = height * 32
-        self.__height_to_hash[idx: idx + 32] = block_hash
+        self.__height_to_hash[idx : idx + 32] = block_hash
         self.__dirty += 1
+
+    def get_hash(self, height: uint32) -> bytes32:
+        idx = height * 32
+        assert idx + 32 <= len(self.__height_to_hash)
+        return bytes32(self.__height_to_hash[idx : idx + 32])
+
+    def contains_height(self, height: uint32) -> bool:
+        return height * 32 < len(self.__height_to_hash)
 
     def set_coefficient(self, height: uint32, coefficient: Decimal) -> None:
         self.__height_to_coefficient[height] = coefficient
@@ -269,14 +275,6 @@ class BlockHeightMap:
 
         await write_file_async(self.__height_to_coefficient_filename, coefficient_buf)
 
-    def get_hash(self, height: uint32) -> bytes32:
-        idx = height * 32
-        assert idx + 32 <= len(self.__height_to_hash)
-        return bytes32(self.__height_to_hash[idx: idx + 32])
-
-    def contains_height(self, height: uint32) -> bool:
-        return height * 32 < len(self.__height_to_hash)
-
     def rollback(self, fork_height: int) -> None:
         # fork height may be -1, in which case all blocks are different and we
         # should clear all sub epoch summaries
@@ -286,7 +284,7 @@ class BlockHeightMap:
                 heights_to_delete.append(ses_included_height)
         for height in heights_to_delete:
             del self.__sub_epoch_summaries[height]
-        del self.__height_to_hash[(fork_height + 1) * 32:]
+        del self.__height_to_hash[(fork_height + 1) * 32 :]
 
     def get_ses(self, height: uint32) -> SubEpochSummary:
         return SubEpochSummary.from_bytes(self.__sub_epoch_summaries[height])

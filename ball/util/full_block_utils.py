@@ -10,7 +10,7 @@ from chiabip158 import PyBIP158
 
 from ball.types.blockchain_format.coin import Coin
 from ball.types.blockchain_format.foliage import TransactionsInfo
-from ball.types.blockchain_format.program import SerializedProgram
+from ball.types.blockchain_format.serialized_program import SerializedProgram
 from ball.types.blockchain_format.sized_bytes import bytes32
 from ball.util.ints import uint32
 
@@ -31,7 +31,6 @@ def skip_bytes(buf: memoryview) -> memoryview:
 
 
 def skip_optional(buf: memoryview, skip_item: Callable[[memoryview], memoryview]) -> memoryview:
-
     if buf[0] == 0:
         return buf[1:]
     assert buf[0] == 1
@@ -124,7 +123,7 @@ def skip_proof_of_space(buf: memoryview) -> memoryview:
     buf = skip_bytes32(buf)  # challenge
     buf = skip_optional(buf, skip_g1_element)  # pool_public_key
     buf = skip_optional(buf, skip_bytes32)  # pool_contract_puzzle_hash
-    buf = skip_g1_element(buf)  # plot_public_key
+    buf = skip_g1_element(buf)  # local_public_key
     buf = skip_uint8(buf)  # size
     buf = skip_bytes(buf)  # proof
     return skip_g1_element(buf)  # stakings farmer_public_key

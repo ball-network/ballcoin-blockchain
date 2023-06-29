@@ -98,10 +98,12 @@ class DataLayerRpcApi:
             "/take_offer": self.take_offer,
             "/verify_offer": self.verify_offer,
             "/cancel_offer": self.cancel_offer,
+            "/get_sync_status": self.get_sync_status,
+            "/check_plugins": self.check_plugins,
         }
 
     async def _state_changed(self, change: str, change_data: Optional[Dict[str, Any]]) -> List[WsRpcMessage]:
-        pass
+        return []
 
     async def create_data_store(self, request: Dict[str, Any]) -> EndpointResult:
         if self.service is None:
@@ -411,3 +413,26 @@ class DataLayerRpcApi:
         )
 
         return CancelOfferResponse(success=True)
+
+    async def get_sync_status(self, request: Dict[str, Any]) -> EndpointResult:
+        store_id = request["id"]
+        id_bytes = bytes32.from_hexstr(store_id)
+        if self.service is None:
+            raise Exception("Data layer not created")
+        sync_status = await self.service.get_sync_status(id_bytes)
+
+        return {
+            "sync_status": {
+                "root_hash": sync_status.root_hash.hex(),
+                "generation": sync_status.generation,
+                "target_root_hash": sync_status.target_root_hash.hex(),
+                "target_generation": sync_status.target_generation,
+            }
+        }
+
+    async def check_plugins(self, request: Dict[str, Any]) -> EndpointResult:
+        if self.service is None:
+            raise Exception("Data layer not created")
+        plugin_status = await self.service.check_plugins()
+
+        return plugin_status.marshal()

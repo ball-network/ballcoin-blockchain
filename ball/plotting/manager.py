@@ -55,7 +55,7 @@ class PlotManager:
         self.no_key_filenames = set()
         self.farmer_public_keys = []
         self.pool_public_keys = []
-        self.cache = Cache(self.root_path.resolve() / "cache" / "plot_manager.dat")
+        self.cache = Cache(self.root_path.resolve() / "cache" / "plots_manager.dat")
         self.match_str = match_str
         self.open_no_key_filenames = open_no_key_filenames
         self.last_refresh_time = 0
@@ -73,7 +73,7 @@ class PlotManager:
     def __exit__(self, exc_type, exc_value, exc_traceback):
         self._lock.release()
 
-    def reset(self):
+    def reset(self) -> None:
         with self:
             self.last_refresh_time = time.time()
             self.plots.clear()
@@ -89,11 +89,11 @@ class PlotManager:
         self.farmer_public_keys = farmer_public_keys
         self.pool_public_keys = pool_public_keys
 
-    def initial_refresh(self):
+    def initial_refresh(self) -> bool:
         return self._initial
 
-    def public_keys_available(self):
-        return len(self.farmer_public_keys) and len(self.pool_public_keys)
+    def public_keys_available(self) -> bool:
+        return len(self.farmer_public_keys) > 0 and len(self.pool_public_keys) > 0
 
     def plot_count(self) -> int:
         with self:
@@ -324,9 +324,10 @@ class PlotManager:
                     cache_entry.pool_public_key,
                     cache_entry.pool_contract_puzzle_hash,
                     cache_entry.plot_public_key,
+                    cache_entry.local_public_key,
                     stat_info.st_size,
                     stat_info.st_mtime,
-                    cache_entry.farmer_public_key,
+                    cache_entry.farmer_public_key,  # staking
                 )
 
                 cache_entry.bump_last_use()

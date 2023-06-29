@@ -4,37 +4,49 @@ import asyncio
 import time
 from decimal import Decimal
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple, Dict
 
 from blspy import AugSchemeMPL, G1Element, G2Element
 
 from ball.consensus.pot_iterations import calculate_iterations_quality, calculate_sp_interval_iters
 from ball.harvester.harvester import Harvester
-from ball.plotting.util import PlotInfo, parse_plot_info, parse_plot_info_local_master_sk
+from ball.plotting.util import PlotInfo, parse_plot_info
 from ball.protocols import harvester_protocol
 from ball.protocols.farmer_protocol import FarmingInfo
 from ball.protocols.harvester_protocol import Plot, PlotSyncResponse
 from ball.protocols.protocol_message_types import ProtocolMessageTypes
-from ball.server.outbound_message import make_msg
+from ball.server.outbound_message import Message, make_msg
 from ball.server.ws_connection import WSBallConnection
-from ball.types.blockchain_format.proof_of_space import ProofOfSpace
+from ball.types.blockchain_format.proof_of_space import (
+    ProofOfSpace,
+    calculate_pos_challenge,
+    generate_plot_public_key,
+    passes_plot_filter,
+)
 from ball.types.blockchain_format.sized_bytes import bytes32
-from ball.util.api_decorators import api_request, peer_required
+from ball.util.api_decorators import api_request
 from ball.util.ints import uint8, uint32, uint64
 from ball.wallet.derive_keys import master_sk_to_local_sk
 
 
 class HarvesterAPI:
+    stakings: Dict[bytes, str]
     harvester: Harvester
 
     def __init__(self, harvester: Harvester):
         self.harvester = harvester
+        self.stakings = {}
 
-    @peer_required
-    @api_request
+    def get_difficulty_coefficient(self, farmer_public_key: G1Element) -> Optional[str]:
+        coefficient: Optional[str] = self.stakings.get(bytes(farmer_public_key))
+        if coefficient is None:
+            self.harvester.log.error(f"Error get staking for farmer_public_key {farmer_public_key}")
+        return coefficient
+
+    @api_request(peer_required=True)
     async def harvester_handshake(
         self, harvester_handshake: harvester_protocol.HarvesterHandshake, peer: WSBallConnection
-    ):
+    ) -> None:
         """
         Handshake between the harvester and farmer. The harvester receives the pool public keys,
         as well as the farmer pks, which must be put into the plots, before the plotting process begins.
@@ -47,11 +59,10 @@ class HarvesterAPI:
         await self.harvester.plot_sync_sender.start()
         self.harvester.plot_manager.start_refreshing()
 
-    @peer_required
-    @api_request
+    @api_request(peer_required=True)
     async def new_signage_point_harvester(
         self, new_challenge: harvester_protocol.NewSignagePointHarvester, peer: WSBallConnection
-    ):
+    ) -> None:
         """
         The harvester receives a new signage point from the farmer, this happens at the start of each slot.
         The harvester does a few things:
@@ -77,9 +88,9 @@ class HarvesterAPI:
         start = time.time()
         assert len(new_challenge.challenge_hash) == 32
 
-        loop = asyncio.get_running_loop()
+        self.stakings = {bytes(k): v for k, v in new_challenge.stakings}
 
-        stakings = {bytes(k): Decimal(v) for k, v in new_challenge.stakings}
+        loop = asyncio.get_running_loop()
 
         def blocking_lookup(
             filename: Path, plot_info: PlotInfo, difficulty_coefficient: Decimal
@@ -88,7 +99,7 @@ class HarvesterAPI:
             # so it should be run in a thread pool.
             try:
                 plot_id = plot_info.prover.get_id()
-                sp_challenge_hash = ProofOfSpace.calculate_pos_challenge(
+                sp_challenge_hash = calculate_pos_challenge(
                     plot_id,
                     new_challenge.challenge_hash,
                     new_challenge.sp_hash,
@@ -124,7 +135,7 @@ class HarvesterAPI:
                             plot_info.prover.get_size(),
                             difficulty,
                             new_challenge.sp_hash,
-                            difficulty_coefficient,
+                            difficulty_coefficient,  # staking
                         )
                         sp_interval_iters = calculate_sp_interval_iters(self.harvester.constants, sub_slot_iters)
                         if required_iters < sp_interval_iters:
@@ -141,22 +152,17 @@ class HarvesterAPI:
                                     f"plot_info: {plot_info}"
                                 )
                                 continue
-
-                            local_master_sk = parse_plot_info_local_master_sk(plot_info.prover.get_memo())
-                            responses.append(
-                                (
-                                    quality_str,
-                                    ProofOfSpace(
-                                        sp_challenge_hash,
-                                        plot_info.pool_public_key,
-                                        plot_info.pool_contract_puzzle_hash,
-                                        master_sk_to_local_sk(local_master_sk).get_g1(),
-                                        uint8(plot_info.prover.get_size()),
-                                        proof_xs,
-                                        plot_info.farmer_public_key,
-                                    ),
-                                )
+                            proof_of_space: ProofOfSpace = ProofOfSpace(
+                                sp_challenge_hash,
+                                plot_info.pool_public_key,
+                                plot_info.pool_contract_puzzle_hash,
+                                plot_info.local_public_key,
+                                uint8(plot_info.prover.get_size()),
+                                proof_xs,
+                                plot_info.farmer_public_key,
                             )
+                            proof_of_space.set_plot_public_key(plot_info.plot_public_key)
+                            responses.append((quality_str, proof_of_space))
                 return responses
             except Exception as e:
                 self.harvester.log.error(f"Unknown error: {e}")
@@ -169,17 +175,14 @@ class HarvesterAPI:
             all_responses: List[harvester_protocol.NewProofOfSpace] = []
             if self.harvester._shut_down:
                 return filename, []
+
             # staking
-            if stakings:
-                try:
-                    difficulty_coefficient = stakings[bytes(plot_info.farmer_public_key)]
-                except KeyError as e:
-                    self.harvester.log.error(f"Error get staking for farmer_public_key {plot_info.farmer_public_key}, {e}")
-                    return filename, []
-            else:
-                difficulty_coefficient = Decimal(1)
+            difficulty_coefficient = self.get_difficulty_coefficient(plot_info.farmer_public_key)
+            if difficulty_coefficient is None:
+                return filename, []
+
             proofs_of_space_and_q: List[Tuple[bytes32, ProofOfSpace]] = await loop.run_in_executor(
-                self.harvester.executor, blocking_lookup, filename, plot_info, difficulty_coefficient
+                self.harvester.executor, blocking_lookup, filename, plot_info, Decimal(difficulty_coefficient)
             )
             for quality_str, proof_of_space in proofs_of_space_and_q:
                 all_responses.append(
@@ -189,7 +192,7 @@ class HarvesterAPI:
                         quality_str.hex() + str(filename.resolve()),
                         proof_of_space,
                         new_challenge.signage_point_index,
-                        difficulty_coefficient,
+                        difficulty_coefficient
                     )
                 )
             return filename, all_responses
@@ -203,7 +206,7 @@ class HarvesterAPI:
                 # Passes the plot filter (does not check sp filter yet though, since we have not reached sp)
                 # This is being executed at the beginning of the slot
                 total += 1
-                if ProofOfSpace.passes_plot_filter(
+                if passes_plot_filter(
                     self.harvester.constants,
                     try_plot_info.prover.get_id(),
                     new_challenge.challenge_hash,
@@ -260,8 +263,8 @@ class HarvesterAPI:
             },
         )
 
-    @api_request
-    async def request_signatures(self, request: harvester_protocol.RequestSignatures):
+    @api_request()
+    async def request_signatures(self, request: harvester_protocol.RequestSignatures) -> Optional[Message]:
         """
         The farmer requests a signature on the header hash, for one of the proofs that we found.
         A signature is created on the header hash using the harvester private key. This can also
@@ -289,7 +292,7 @@ class HarvesterAPI:
             assert isinstance(pool_public_key_or_puzzle_hash, bytes32)
             include_taproot = True
 
-        agg_pk = ProofOfSpace.generate_plot_public_key(local_sk.get_g1(), farmer_public_key, include_taproot)
+        agg_pk = generate_plot_public_key(local_sk.get_g1(), farmer_public_key, include_taproot)
 
         # This is only a partial signature. When combined with the farmer's half, it will
         # form a complete PrependSignature.
@@ -298,6 +301,10 @@ class HarvesterAPI:
             signature: G2Element = AugSchemeMPL.sign(local_sk, message, agg_pk)
             message_signatures.append((message, signature))
 
+        difficulty_coefficient = self.get_difficulty_coefficient(plot_info.farmer_public_key)
+        if difficulty_coefficient is None:
+            self.harvester.log.warning(f"KeyError difficulty_coefficient plot {farmer_public_key} does not exist.")
+            return None
         response: harvester_protocol.RespondSignatures = harvester_protocol.RespondSignatures(
             request.plot_identifier,
             request.challenge_hash,
@@ -305,12 +312,13 @@ class HarvesterAPI:
             local_sk.get_g1(),
             farmer_public_key,
             message_signatures,
+            difficulty_coefficient,
         )
 
         return make_msg(ProtocolMessageTypes.respond_signatures, response)
 
-    @api_request
-    async def request_plots(self, _: harvester_protocol.RequestPlots):
+    @api_request()
+    async def request_plots(self, _: harvester_protocol.RequestPlots) -> Message:
         plots_response = []
         plots, failed_to_open_filenames, no_key_filenames = self.harvester.get_plots()
         for plot in plots:
@@ -324,13 +332,13 @@ class HarvesterAPI:
                     plot["plot_public_key"],
                     plot["file_size"],
                     plot["time_modified"],
-                    plot["farmer_public_key"],
+                    plot["farmer_public_key"],  # staking
                 )
             )
 
         response = harvester_protocol.RespondPlots(plots_response, failed_to_open_filenames, no_key_filenames)
         return make_msg(ProtocolMessageTypes.respond_plots, response)
 
-    @api_request
-    async def plot_sync_response(self, response: PlotSyncResponse):
+    @api_request()
+    async def plot_sync_response(self, response: PlotSyncResponse) -> None:
         self.harvester.plot_sync_sender.set_response(response)

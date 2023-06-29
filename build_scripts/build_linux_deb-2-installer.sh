@@ -53,7 +53,7 @@ mkdir -p "dist/$CLI_DEB_BASE/usr/bin"
 mkdir -p "dist/$CLI_DEB_BASE/DEBIAN"
 j2 -o "dist/$CLI_DEB_BASE/DEBIAN/control" assets/deb/control.j2
 cp -r dist/daemon/* "dist/$CLI_DEB_BASE/opt/ball/"
-ln -s ../../opt/ball/ballcoin "dist/$CLI_DEB_BASE/usr/bin/ball"
+ln -s ../../opt/ball/ball "dist/$CLI_DEB_BASE/usr/bin/ball"
 dpkg-deb --build --root-owner-group "dist/$CLI_DEB_BASE"
 # CLI only .deb done
 
@@ -83,18 +83,22 @@ if [ "$PLATFORM" = "arm64" ]; then
   sudo gem install public_suffix -v 4.0.7
   sudo gem install fpm
   echo USE_SYSTEM_FPM=true electron-builder build --linux deb --arm64 \
-    --config.productName="$PRODUCT_NAME" --config.linux.desktop.Name="Ball Blockchain" \
+    --config.extraMetadata.name=ballcoin-blockchain \
+    --config.productName="$PRODUCT_NAME" --config.linux.desktop.Name="BallCoin Blockchain" \
     --config.deb.packageName="ballcoin-blockchain"
   USE_SYSTEM_FPM=true electron-builder build --linux deb --arm64 \
-    --config.productName="$PRODUCT_NAME" --config.linux.desktop.Name="Ball Blockchain" \
+    --config.extraMetadata.name=ballcoin-blockchain \
+    --config.productName="$PRODUCT_NAME" --config.linux.desktop.Name="BallCoin Blockchain" \
     --config.deb.packageName="ballcoin-blockchain"
   LAST_EXIT_CODE=$?
 else
   echo electron-builder build --linux deb --x64 \
-    --config.productName="$PRODUCT_NAME" --config.linux.desktop.Name="Ball Blockchain" \
+    --config.extraMetadata.name=ballcoin-blockchain \
+    --config.productName="$PRODUCT_NAME" --config.linux.desktop.Name="BallCoin Blockchain" \
     --config.deb.packageName="ballcoin-blockchain"
   electron-builder build --linux deb --x64 \
-    --config.productName="$PRODUCT_NAME" --config.linux.desktop.Name="Ball Blockchain" \
+    --config.extraMetadata.name=ballcoin-blockchain \
+    --config.productName="$PRODUCT_NAME" --config.linux.desktop.Name="BallCoin Blockchain" \
     --config.deb.packageName="ballcoin-blockchain"
   LAST_EXIT_CODE=$?
 fi

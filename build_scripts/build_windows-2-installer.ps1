@@ -2,23 +2,29 @@
 
 $ErrorActionPreference = "Stop"
 
+# mkdir build_scripts\win_build
 
+git status
+git submodule
+
+$env:BALL_INSTALLER_VERSION = '1.8.1'
 if (-not (Test-Path env:BALL_INSTALLER_VERSION)) {
   $env:BALL_INSTALLER_VERSION = '0.0.0'
   Write-Output "WARNING: No environment variable BALL_INSTALLER_VERSION set. Using 0.0.0"
 }
+Write-Output "Ball Version is: $env:BALL_INSTALLER_VERSION"
+Write-Output "   ---"
 
 Write-Output "   ---"
 Write-Output "Use pyinstaller to create ball .exe's"
 Write-Output "   ---"
 $SPEC_FILE = (python -c 'import ball; print(ball.PYINSTALLER_SPEC_PATH)') -join "`n"
 pyinstaller --log-level INFO $SPEC_FILE
-Write-Output "   ---"
 
+Write-Output "   ---"
 Write-Output "Copy ball executables to ballcoin-blockchain-gui\"
 Write-Output "   ---"
 Copy-Item "dist\daemon" -Destination "..\ballcoin-blockchain-gui\packages\gui\" -Recurse
-
 
 Write-Output "   ---"
 Write-Output "Setup npm packager"
@@ -40,12 +46,25 @@ $Env:NODE_OPTIONS = "--max-old-space-size=3000"
 # Change to the GUI directory
 Set-Location -Path "ballcoin-blockchain-gui\packages\gui" -PassThru
 
+Write-Output "   ---"
+Write-Output "Increase the stack for ball command for (ball plots create) chiapos limitations"
+# editbin.exe needs to be in the path
+editbin.exe /STACK:8000000 daemon\ball.exe
+Write-Output "   ---"
 
 $packageVersion = "$env:BALL_INSTALLER_VERSION"
 $packageName = "Ball-$packageVersion"
 
 Write-Output "packageName is $packageName"
 
+Write-Output "   ---"
+Write-Output "fix version in package.json"
+#choco install jq
+cp package.json package.json.orig
+jq --arg VER "$env:BALL_INSTALLER_VERSION" '.version=$VER' package.json > temp.json
+rm package.json
+mv temp.json package.json
+Write-Output "   ---"
 
 Write-Output "   ---"
 Write-Output "electron-builder"
@@ -61,9 +80,7 @@ If ($env:HAS_SECRET) {
    }   Else    {
    Write-Output "Skipping verify signatures - no authorization to install certificates"
 }
-if (-not (Test-Path env:GITHUB_WORKSPACE)) {
-  $env:GITHUB_WORKSPACE = "..\..\.."
-}
+
 Write-Output "   ---"
 Write-Output "Moving final installers to expected location"
 Write-Output "   ---"

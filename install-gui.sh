@@ -13,13 +13,13 @@ if [ "${SCRIPT_DIR}" != "$(pwd)" ]; then
 fi
 
 if [ -z "$VIRTUAL_ENV" ]; then
-  echo "This requires the ballcoin python virtual environment."
+  echo "This requires the ball python virtual environment."
   echo "Execute '. ./activate' before running."
   exit 1
 fi
 
 if [ "$(id -u)" = 0 ]; then
-  echo "The Ball Blockchain GUI can not be installed or run by the root user."
+  echo "The BallCoin Blockchain GUI can not be installed or run by the root user."
   exit 1
 fi
 
@@ -148,6 +148,13 @@ if [ "$(uname)" = "Linux" ]; then
       sudo dnf install -y nodejs
     fi
     do_install_npm_locally
+  elif type pacman >/dev/null 2>&1 && [ -f /etc/arch-release ]; then
+    #Arch Linux
+    if ! nodejs_is_installed; then
+      echo "Installing nodejs on Arch Linux"
+      sudo pacman -S nodejs npm
+    fi
+    do_install_npm_locally
   fi
 elif [ "$(uname)" = "Darwin" ] && type brew >/dev/null 2>&1; then
   # MacOS
@@ -201,13 +208,13 @@ if [ ! "$CI" ]; then
   npm audit fix || true
   npm run build
 
-  # Set modified output of `ballcoin version` to version property of GUI's package.json
+  # Set modified output of `ball version` to version property of GUI's package.json
   python ../installhelper.py
 else
   echo "Skipping node.js in install.sh on MacOS ci."
 fi
 
 echo ""
-echo "Ball blockchain install-gui.sh completed."
+echo "BallCoin Blockchain install-gui.sh completed."
 echo ""
 echo "Type 'bash start-gui.sh &' to start the GUI."

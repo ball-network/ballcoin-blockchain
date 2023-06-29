@@ -1,6 +1,8 @@
-from typing import List, Optional, Tuple, Set
+from __future__ import annotations
 
-from blspy import AugSchemeMPL, PrivateKey, G1Element
+from typing import List, Optional, Set, Tuple
+
+from blspy import AugSchemeMPL, G1Element, PrivateKey
 
 from ball.consensus.coinbase import create_puzzlehash_for_pk
 from ball.types.blockchain_format.sized_bytes import bytes32
@@ -9,7 +11,7 @@ from ball.util.ints import uint32
 # EIP 2334 bls key derivation
 # https://eips.ethereum.org/EIPS/eip-2334
 # 12381 = bls spec number
-# 8444 = Ball blockchain number and port number
+# 8444 = BallCoin Blockchain number and port number
 # 0, 1, 2, 3, 4, 5, 6 farmer, pool, wallet, local, backup key, singleton, pooling authentication key numbers
 
 # Allows up to 100 pool wallets (plot NFTs)
@@ -113,7 +115,6 @@ def match_address_to_sk(
     search_list: Set[bytes32] = set(addresses_to_search)
 
     for i in range(max_ph_to_search):
-
         phs = [
             create_puzzlehash_for_pk(master_sk_to_wallet_sk(sk, uint32(i)).get_g1()),
             create_puzzlehash_for_pk(master_sk_to_wallet_sk_unhardened(sk, uint32(i)).get_g1()),

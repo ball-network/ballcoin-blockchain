@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Tuple, Union
 
 from blspy import G1Element, PrivateKey
 from chiapos import DiskProver
+from typing_extensions import final
 
 from ball.types.blockchain_format.sized_bytes import bytes32
 from ball.util.config import load_config, lock_and_load_config, save_config
@@ -32,9 +33,10 @@ class PlotInfo:
     pool_public_key: Optional[G1Element]
     pool_contract_puzzle_hash: Optional[bytes32]
     plot_public_key: G1Element
+    local_public_key: G1Element
     file_size: int
     time_modified: float
-    farmer_public_key: G1Element #stakings
+    farmer_public_key: G1Element  # staking
 
 
 class PlotRefreshEvents(Enum):
@@ -67,6 +69,23 @@ class PlotRefreshResult:
     duration: float = 0
 
 
+@final
+@dataclass
+class Params:
+    size: int
+    num: int
+    buffer: int
+    num_threads: int
+    buckets: int
+    tmp_dir: Path
+    tmp2_dir: Optional[Path]
+    final_dir: Path
+    plotid: Optional[str]
+    memo: Optional[str]
+    nobitfield: bool
+    stripe_size: int = 65536
+
+
 def get_plot_directories(root_path: Path, config: Dict = None) -> List[str]:
     if config is None:
         config = load_config(root_path, "config.yaml")
@@ -79,7 +98,11 @@ def get_plot_filenames(root_path: Path) -> Dict[Path, List[Path]]:
     config = load_config(root_path, "config.yaml")
     recursive_scan: bool = config["harvester"].get("recursive_plot_scan", False)
     for directory_name in get_plot_directories(root_path, config):
-        directory = Path(directory_name).resolve()
+        try:
+            directory = Path(directory_name).resolve()
+        except (OSError, RuntimeError):
+            log.exception(f"Failed to resolve {directory_name}")
+            continue
         all_files[directory] = get_filenames(directory, recursive_scan)
     return all_files
 
@@ -159,18 +182,6 @@ def parse_plot_info(memo: bytes) -> Tuple[Union[G1Element, bytes32], G1Element, 
             G1Element.from_bytes(memo[32:80]),
             PrivateKey.from_bytes(memo[80:]),
         )
-    else:
-        raise ValueError(f"Invalid number of bytes {len(memo)}")
-
-
-def parse_plot_info_local_master_sk(memo: bytes) -> PrivateKey:
-    # Parses the plot info bytes into keys
-    if len(memo) == (48 + 48 + 32):
-        # This is a public key memo
-        return PrivateKey.from_bytes(memo[96:])
-    elif len(memo) == (32 + 48 + 32):
-        # This is a pool_contract_puzzle_hash memo
-        return PrivateKey.from_bytes(memo[80:])
     else:
         raise ValueError(f"Invalid number of bytes {len(memo)}")
 

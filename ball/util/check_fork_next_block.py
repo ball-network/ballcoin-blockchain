@@ -1,12 +1,18 @@
-from typing import List, Callable
+from __future__ import annotations
+
+from typing import Awaitable, Callable, List
 
 from ball.consensus.blockchain_interface import BlockchainInterface
+from ball.server.ws_connection import WSBallConnection
 from ball.util.ints import uint32
 
 
 async def check_fork_next_block(
-    blockchain: BlockchainInterface, fork_point_height: uint32, peers_with_peak: List, check_block_future: Callable
-):
+    blockchain: BlockchainInterface,
+    fork_point_height: uint32,
+    peers_with_peak: List[WSBallConnection],
+    check_block_future: Callable[[WSBallConnection, uint32, BlockchainInterface], Awaitable[bool]],
+) -> uint32:
     our_peak_height = blockchain.get_peak_height()
     ses_heigths = blockchain.get_ses_heights()
     if len(ses_heigths) > 2 and our_peak_height is not None:

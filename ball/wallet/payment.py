@@ -1,9 +1,10 @@
-from dataclasses import dataclass
+from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import List
 
-from ball.types.blockchain_format.sized_bytes import bytes32
 from ball.types.blockchain_format.program import Program
+from ball.types.blockchain_format.sized_bytes import bytes32
 from ball.util.ints import uint64
 
 

@@ -1,21 +1,23 @@
+from __future__ import annotations
+
 import logging
+from logging.handlers import SysLogHandler
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import colorlog
 from concurrent_log_handler import ConcurrentRotatingFileHandler
-from logging.handlers import SysLogHandler
 
 from ball.cmds.init_funcs import ball_full_version_str
-from ball.util.path import path_from_root
 from ball.util.default_root import DEFAULT_ROOT_PATH
+from ball.util.path import path_from_root
 
 default_log_level = "WARNING"
 
 
 def get_beta_logging_config() -> Dict[str, Any]:
     return {
-        "log_filename": f"{ball_full_version_str()}/ball-blockchain/beta.log",
+        "log_filename": f"{ball_full_version_str()}/ballcoin-blockchain/beta.log",
         "log_level": "DEBUG",
         "log_stdout": False,
         "log_maxfilesrotation": 100,

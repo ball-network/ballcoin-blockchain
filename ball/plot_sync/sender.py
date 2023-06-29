@@ -23,7 +23,9 @@ from ball.protocols.harvester_protocol import (
     PlotSyncResponse,
     PlotSyncStart,
 )
-from ball.server.ws_connection import NodeType, ProtocolMessageTypes, WSBallConnection, make_msg
+from ball.protocols.protocol_message_types import ProtocolMessageTypes
+from ball.server.outbound_message import NodeType, make_msg
+from ball.server.ws_connection import WSBallConnection
 from ball.util.generator_tools import list_to_batches
 from ball.util.ints import int16, uint32, uint64
 
@@ -43,7 +45,7 @@ def _convert_plot_info_list(plot_infos: List[PlotInfo]) -> List[Plot]:
                 plot_public_key=plot_info.plot_public_key,
                 file_size=uint64(plot_info.file_size),
                 time_modified=uint64(int(plot_info.time_modified)),
-                farmer_public_key=plot_info.farmer_public_key,  # stakings
+                farmer_public_key=plot_info.farmer_public_key,  # staking
             )
         )
     return converted
@@ -117,8 +119,7 @@ class Sender:
             await self.await_closed()
         if self._task is None:
             self._task = asyncio.create_task(self._run())
-            # TODO, Add typing in PlotManager
-            if not self._plot_manager.initial_refresh() or self._sync_id != 0:  # type:ignore[no-untyped-call]
+            if not self._plot_manager.initial_refresh() or self._sync_id != 0:
                 self._reset()
         else:
             raise AlreadyStartedError()
@@ -172,7 +173,7 @@ class Sender:
             return False
         if response.identifier.sync_id != self._response.identifier.sync_id:
             log.warning(
-                "set_response unexpected sync-id: " f"{response.identifier.sync_id}/{self._response.identifier.sync_id}"
+                "set_response unexpected sync-id: {response.identifier.sync_id}/{self._response.identifier.sync_id}"
             )
             return False
         if response.identifier.message_id != self._response.identifier.message_id:
@@ -183,7 +184,7 @@ class Sender:
             return False
         if response.message_type != int16(self._response.message_type.value):
             log.warning(
-                "set_response unexpected message-type: " f"{response.message_type}/{self._response.message_type.value}"
+                "set_response unexpected message-type: {response.message_type}/{self._response.message_type.value}"
             )
             return False
         log.debug(f"set_response valid {response}")

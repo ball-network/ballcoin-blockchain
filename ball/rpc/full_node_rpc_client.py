@@ -1,4 +1,8 @@
-from typing import Dict, List, Optional, Tuple, Any
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional, Tuple
+
+from chia_rs import Coin
 
 from ball.consensus.block_record import BlockRecord
 from ball.full_node.signage_point import SignagePoint
@@ -231,9 +235,11 @@ class FullNodeRpcClient(RpcClient):
             converted[bytes32(hexstr_to_bytes(tx_id_hex))] = item
         return converted
 
-    async def get_mempool_item_by_tx_id(self, tx_id: bytes32) -> Optional[Dict]:
+    async def get_mempool_item_by_tx_id(self, tx_id: bytes32, include_pending: bool = False) -> Optional[Dict]:
         try:
-            response = await self.fetch("get_mempool_item_by_tx_id", {"tx_id": tx_id.hex()})
+            response = await self.fetch(
+                "get_mempool_item_by_tx_id", {"tx_id": tx_id.hex(), "include_pending": include_pending}
+            )
             return response["mempool_item"]
         except Exception:
             return None
@@ -269,7 +275,20 @@ class FullNodeRpcClient(RpcClient):
         response = await self.fetch("get_fee_estimate", {"cost": cost, "target_times": target_times})
         return response
 
-    # stakings
     async def check_puzzle_hash_coin(self, puzzle_hash: bytes32) -> Optional[bool]:
-        response = await self.fetch("check_puzzle_hash_coin", {"puzzle_hash": puzzle_hash.hex()})
-        return response["status"]
+        try:
+            response = await self.fetch("check_puzzle_hash_coin", {"puzzle_hash": puzzle_hash.hex()})
+            return response["status"]
+        except Exception:
+            return False
+
+    async def get_coins_by_puzzle_hash_timestamp(
+        self,
+        puzzle_hash: bytes32,
+        timestamp: uint64,
+    ) -> List:
+        d = {"puzzle_hash": puzzle_hash.hex(), "timestamp": timestamp}
+
+        response = await self.fetch("get_coins_by_puzzle_hash_timestamp", d)
+        return [Coin.from_json_dict(coin) for coin in response["coin_records"]]
+

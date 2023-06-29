@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import Optional, Dict
+from typing import Dict, Optional
 
 from blspy import G1Element
 
@@ -9,8 +11,8 @@ from ball.types.blockchain_format.coin import Coin
 from ball.types.blockchain_format.program import Program
 from ball.types.blockchain_format.sized_bytes import bytes32
 from ball.util.byte_types import hexstr_to_bytes
-from ball.util.ints import uint32, uint8
-from ball.util.streamable import streamable, Streamable
+from ball.util.ints import uint8, uint32
+from ball.util.streamable import Streamable, streamable
 
 
 class PoolSingletonState(IntEnum):

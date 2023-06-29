@@ -15,7 +15,7 @@ from multiprocessing.context import BaseContext
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
-from aiohttp import ClientTimeout, ClientSession
+from aiohttp import ClientSession, ClientTimeout
 from blspy import G1Element
 
 from ball.cmds.units import units
@@ -41,7 +41,7 @@ from ball.full_node.coin_store import CoinStore
 from ball.full_node.mempool_check_conditions import get_name_puzzle_conditions
 from ball.types.block_protocol import BlockInfo
 from ball.types.blockchain_format.coin import Coin
-from ball.types.blockchain_format.program import SerializedProgram
+from ball.types.blockchain_format.serialized_program import SerializedProgram
 from ball.types.blockchain_format.sized_bytes import bytes32
 from ball.types.blockchain_format.sub_epoch_summary import SubEpochSummary
 from ball.types.blockchain_format.vdf import VDFInfo
@@ -66,9 +66,9 @@ from ball.util.setproctitle import getproctitle, setproctitle
 log = logging.getLogger(__name__)
 
 
-class ReceiveBlockResult(Enum):
+class AddBlockResult(Enum):
     """
-    When Blockchain.receive_block(b) is called, one of these results is returned,
+    When Blockchain.add_block(b) is called, one of these results is returned,
     showing whether the block was added to the chain (extending the peak),
     and if not, why it was not added.
     """
@@ -98,10 +98,11 @@ class Blockchain(BlockchainInterface):
     __block_records: Dict[bytes32, BlockRecord]
     # all hashes of blocks in block_record by height, used for garbage collection
     __heights_in_cache: Dict[uint32, Set[bytes32]]
-    __height_in_coefficient: Dict[str, Decimal]
     # maps block height (of the current heaviest chain) to block hash and sub
     # epoch summaries
     __height_map: BlockHeightMap
+    # all coefficient by height
+    __key_in_coefficient: Dict[str, Decimal]
     # Unspent Store
     coin_store: CoinStore
     # Store
@@ -120,14 +121,14 @@ class Blockchain(BlockchainInterface):
 
     @staticmethod
     async def create(
-            coin_store: CoinStore,
-            block_store: BlockStore,
-            consensus_constants: ConsensusConstants,
-            blockchain_dir: Path,
-            reserved_cores: int,
-            multiprocessing_context: Optional[BaseContext] = None,
-            *,
-            single_threaded: bool = False,
+        coin_store: CoinStore,
+        block_store: BlockStore,
+        consensus_constants: ConsensusConstants,
+        blockchain_dir: Path,
+        reserved_cores: int,
+        multiprocessing_context: Optional[BaseContext] = None,
+        *,
+        single_threaded: bool = False,
     ) -> "Blockchain":
         """
         Initializes a blockchain with the BlockRecords from disk, assuming they have all been
@@ -171,7 +172,7 @@ class Blockchain(BlockchainInterface):
         self.__height_map = await BlockHeightMap.create(blockchain_dir, self.block_store.db_wrapper)
         self.__block_records = {}
         self.__heights_in_cache = {}
-        self.__height_in_coefficient = {}
+        self.__key_in_coefficient = {}
         block_records, peak = await self.block_store.get_block_records_close_to_peak(self.constants.BLOCKS_CACHE_SIZE)
         for block in block_records.values():
             self.add_block_record(block)
@@ -207,12 +208,13 @@ class Blockchain(BlockchainInterface):
     async def get_full_block(self, header_hash: bytes32) -> Optional[FullBlock]:
         return await self.block_store.get_full_block(header_hash)
 
-    async def receive_block(
-            self,
-            block: FullBlock,
-            pre_validation_result: PreValidationResult,
-            fork_point_with_peak: Optional[uint32] = None,
-    ) -> Tuple[ReceiveBlockResult, Optional[Err], Optional[StateChangeSummary]]:
+    async def add_block(
+        self,
+        block: FullBlock,
+        difficulty_coefficient: Decimal,
+        pre_validation_result: PreValidationResult,
+        fork_point_with_peak: Optional[uint32] = None,
+    ) -> Tuple[AddBlockResult, Optional[Err], Optional[StateChangeSummary]]:
         """
         This method must be called under the blockchain lock
         Adds a new block into the blockchain, if it's valid and connected to the current
@@ -237,19 +239,18 @@ class Blockchain(BlockchainInterface):
 
         genesis: bool = block.height == 0
         if self.contains_block(block.header_hash):
-            return ReceiveBlockResult.ALREADY_HAVE_BLOCK, None, None
+            return AddBlockResult.ALREADY_HAVE_BLOCK, None, None
 
         if not self.contains_block(block.prev_header_hash) and not genesis:
-            return ReceiveBlockResult.DISCONNECTED_BLOCK, Err.INVALID_PREV_BLOCK_HASH, None
+            return AddBlockResult.DISCONNECTED_BLOCK, Err.INVALID_PREV_BLOCK_HASH, None
 
         if not genesis and (self.block_record(block.prev_header_hash).height + 1) != block.height:
-            return ReceiveBlockResult.INVALID_BLOCK, Err.INVALID_HEIGHT, None
+            return AddBlockResult.INVALID_BLOCK, Err.INVALID_HEIGHT, None
 
         npc_result: Optional[NPCResult] = pre_validation_result.npc_result
-        difficulty_coefficient: Optional[str] = pre_validation_result.difficulty_coefficient
         required_iters = pre_validation_result.required_iters
         if pre_validation_result.error is not None:
-            return ReceiveBlockResult.INVALID_BLOCK, Err(pre_validation_result.error), None
+            return AddBlockResult.INVALID_BLOCK, Err(pre_validation_result.error), None
         assert required_iters is not None
 
         error_code, _ = await validate_block_body(
@@ -267,7 +268,7 @@ class Blockchain(BlockchainInterface):
             validate_signature=not pre_validation_result.validated_signature,
         )
         if error_code is not None:
-            return ReceiveBlockResult.INVALID_BLOCK, error_code, None
+            return AddBlockResult.INVALID_BLOCK, error_code, None
 
         block_record = block_to_block_record(
             self.constants,
@@ -278,7 +279,7 @@ class Blockchain(BlockchainInterface):
         )
 
         if block.height > 0 and not self.__height_map.contains_coefficient(block.height - 1):
-            self.__height_map.set_coefficient(block.height - 1, Decimal(difficulty_coefficient))
+            self.__height_map.set_coefficient(block.height - 1, difficulty_coefficient)
 
         # Always add the block to the database
         async with self.block_store.db_wrapper.writer():
@@ -320,16 +321,16 @@ class Blockchain(BlockchainInterface):
 
         if state_change_summary is not None:
             # new coin records added
-            return ReceiveBlockResult.NEW_PEAK, None, state_change_summary
+            return AddBlockResult.NEW_PEAK, None, state_change_summary
         else:
-            return ReceiveBlockResult.ADDED_AS_ORPHAN, None, None
+            return AddBlockResult.ADDED_AS_ORPHAN, None, None
 
     async def _reconsider_peak(
-            self,
-            block_record: BlockRecord,
-            genesis: bool,
-            fork_point_with_peak: Optional[uint32],
-            npc_result: Optional[NPCResult],
+        self,
+        block_record: BlockRecord,
+        genesis: bool,
+        fork_point_with_peak: Optional[uint32],
+        npc_result: Optional[NPCResult],
     ) -> Tuple[List[BlockRecord], Optional[StateChangeSummary]]:
         """
         When a new block is added, this is called, to check if the new block is the new peak of the chain.
@@ -383,6 +384,7 @@ class Blockchain(BlockchainInterface):
         if block_record.prev_hash != peak.header_hash:
             for coin_record in await self.coin_store.rollback_to_block(fork_height):
                 rolled_back_state[coin_record.name] = coin_record
+            self.__key_in_coefficient.clear()
 
         # Collects all blocks from fork point to new peak
         blocks_to_add: List[Tuple[FullBlock, BlockRecord]] = []
@@ -446,9 +448,8 @@ class Blockchain(BlockchainInterface):
         )
 
     async def get_tx_removals_and_additions(
-            self, block: FullBlock, npc_result: Optional[NPCResult] = None
+        self, block: FullBlock, npc_result: Optional[NPCResult] = None
     ) -> Tuple[List[bytes32], List[Coin], Optional[NPCResult]]:
-
         if not block.is_transaction_block():
             return [], [], None
 
@@ -459,10 +460,7 @@ class Blockchain(BlockchainInterface):
             block_generator: Optional[BlockGenerator] = await self.get_block_generator(block)
             assert block_generator is not None
             npc_result = get_name_puzzle_conditions(
-                block_generator,
-                self.constants.MAX_BLOCK_COST_CLVM,
-                cost_per_byte=self.constants.COST_PER_BYTE,
-                mempool_mode=False,
+                block_generator, self.constants.MAX_BLOCK_COST_CLVM, mempool_mode=False, height=block.height
             )
         tx_removals, tx_additions = tx_removals_and_additions(npc_result.conds)
         return tx_removals, tx_additions, npc_result
@@ -483,7 +481,7 @@ class Blockchain(BlockchainInterface):
         return get_next_sub_slot_iters_and_difficulty(self.constants, new_slot, curr, self)[0]
 
     async def get_sp_and_ip_sub_slots(
-            self, header_hash: bytes32
+        self, header_hash: bytes32
     ) -> Optional[Tuple[Optional[EndOfSubSlotBundle], Optional[EndOfSubSlotBundle]]]:
         block: Optional[FullBlock] = await self.block_store.get_full_block(header_hash)
         if block is None:
@@ -557,33 +555,39 @@ class Blockchain(BlockchainInterface):
         return list(reversed(recent_rc))
 
     async def validate_unfinished_block_header(
-            self, block: UnfinishedBlock, skip_overflow_ss_validation: bool = True
-    ) -> Tuple[Optional[uint64], Optional[Decimal], Optional[Err]]:
+        self,
+        block: UnfinishedBlock,
+        difficulty_coefficient: Decimal,
+        skip_overflow_ss_validation: bool = True
+    ) -> Tuple[Optional[uint64], Optional[Err]]:
+        if len(block.transactions_generator_ref_list) > self.constants.MAX_GENERATOR_REF_LIST_SIZE:
+            return None, Err.TOO_MANY_GENERATOR_REFS
+
         if (
-                not self.contains_block(block.prev_header_hash)
-                and block.prev_header_hash != self.constants.GENESIS_CHALLENGE
+            not self.contains_block(block.prev_header_hash)
+            and block.prev_header_hash != self.constants.GENESIS_CHALLENGE
         ):
-            return None, None, Err.INVALID_PREV_BLOCK_HASH
+            return None, Err.INVALID_PREV_BLOCK_HASH
 
         if block.transactions_info is not None:
             if block.transactions_generator is not None:
                 if std_hash(bytes(block.transactions_generator)) != block.transactions_info.generator_root:
-                    return None, None, Err.INVALID_TRANSACTIONS_GENERATOR_HASH
+                    return None, Err.INVALID_TRANSACTIONS_GENERATOR_HASH
             else:
                 if block.transactions_info.generator_root != bytes([0] * 32):
-                    return None, None, Err.INVALID_TRANSACTIONS_GENERATOR_HASH
+                    return None, Err.INVALID_TRANSACTIONS_GENERATOR_HASH
 
             if (
-                    block.foliage_transaction_block is None
-                    or block.foliage_transaction_block.transactions_info_hash != block.transactions_info.get_hash()
+                block.foliage_transaction_block is None
+                or block.foliage_transaction_block.transactions_info_hash != block.transactions_info.get_hash()
             ):
-                return None, None, Err.INVALID_TRANSACTIONS_INFO_HASH
+                return None, Err.INVALID_TRANSACTIONS_INFO_HASH
         else:
             # make sure non-tx blocks don't have these fields
             if block.transactions_generator is not None:
-                return None, None, Err.INVALID_TRANSACTIONS_GENERATOR_HASH
+                return None, Err.INVALID_TRANSACTIONS_GENERATOR_HASH
             if block.foliage_transaction_block is not None:
-                return None, None, Err.INVALID_TRANSACTIONS_INFO_HASH
+                return None, Err.INVALID_TRANSACTIONS_INFO_HASH
 
         unfinished_header_block = UnfinishedHeaderBlock(
             block.finished_sub_slots,
@@ -598,11 +602,7 @@ class Blockchain(BlockchainInterface):
         sub_slot_iters, difficulty = get_next_sub_slot_iters_and_difficulty(
             self.constants, len(unfinished_header_block.finished_sub_slots) > 0, prev_b, self
         )
-        # staking
-        difficulty_coefficient = await self.get_farmer_difficulty_coefficient(
-            unfinished_header_block.reward_chain_block.proof_of_space.farmer_public_key,
-            prev_b.height if prev_b is not None else 0,
-        )
+
         required_iters, error = validate_unfinished_header_block(
             self.constants,
             self,
@@ -613,19 +613,22 @@ class Blockchain(BlockchainInterface):
             difficulty_coefficient,
             skip_overflow_ss_validation,
         )
-        if error is not None:
-            return required_iters, None, error.code
-        return required_iters, difficulty_coefficient, None
+
+        return required_iters, error.code if error is not None else None
 
     async def validate_unfinished_block(
-            self, block: UnfinishedBlock, npc_result: Optional[NPCResult], skip_overflow_ss_validation: bool = True
+        self,
+        block: UnfinishedBlock,
+        difficulty_coefficient: Decimal,
+        npc_result: Optional[NPCResult],
+        skip_overflow_ss_validation: bool = True
     ) -> PreValidationResult:
-        required_iters, difficulty_coefficient, error = await self.validate_unfinished_block_header(
-            block, skip_overflow_ss_validation
+        required_iters, error = await self.validate_unfinished_block_header(
+            block, difficulty_coefficient, skip_overflow_ss_validation
         )
 
         if error is not None:
-            return PreValidationResult(uint16(error.value), None, None, False, None)
+            return PreValidationResult(uint16(error.value), None, None, False)
 
         prev_height = (
             -1
@@ -648,23 +651,25 @@ class Blockchain(BlockchainInterface):
         )
 
         if error_code is not None:
-            return PreValidationResult(uint16(error_code.value), None, None, False, None)
+            return PreValidationResult(uint16(error_code.value), None, None, False)
 
-        return PreValidationResult(None, required_iters, cost_result, False, str(difficulty_coefficient))
+        return PreValidationResult(None, required_iters, cost_result, False)
 
     async def pre_validate_blocks_multiprocessing(
-            self,
-            blocks: List[FullBlock],
-            npc_results: Dict[uint32, NPCResult],  # A cache of the result of running CLVM, optional (you can use {})
-            batch_size: int = 4,
-            wp_summaries: Optional[List[SubEpochSummary]] = None,
-            *,
-            validate_signatures: bool,
+        self,
+        blocks: List[FullBlock],
+        difficulty_coefficients: List[Decimal],
+        npc_results: Dict[uint32, NPCResult],  # A cache of the result of running CLVM, optional (you can use {})
+        batch_size: int = 4,
+        wp_summaries: Optional[List[SubEpochSummary]] = None,
+        *,
+        validate_signatures: bool,
     ) -> List[PreValidationResult]:
         return await pre_validate_blocks_multiprocessing(
             self.constants,
             self,
             blocks,
+            difficulty_coefficients,
             self.pool,
             True,
             npc_results,
@@ -674,13 +679,14 @@ class Blockchain(BlockchainInterface):
             validate_signatures=validate_signatures,
         )
 
-    async def run_generator(self, unfinished_block: bytes, generator: BlockGenerator) -> NPCResult:
+    async def run_generator(self, unfinished_block: bytes, generator: BlockGenerator, height: uint32) -> NPCResult:
         task = asyncio.get_running_loop().run_in_executor(
             self.pool,
             _run_generator,
             self.constants,
             unfinished_block,
             bytes(generator),
+            height,
         )
         npc_result_bytes = await task
         if npc_result_bytes is None:
@@ -718,9 +724,6 @@ class Blockchain(BlockchainInterface):
             return None
         return self.__height_map.get_hash(height)
 
-    def del_coefficient(self, height: uint32):
-        self.__height_map.del_coefficient(height)
-
     def contains_height(self, height: uint32) -> bool:
         return self.__height_map.contains_height(height)
 
@@ -754,7 +757,6 @@ class Blockchain(BlockchainInterface):
             return None
         blocks_to_remove = self.__heights_in_cache.get(uint32(height), None)
         while blocks_to_remove is not None and height >= 0:
-            self.__height_in_coefficient.clear()
             for header_hash in blocks_to_remove:
                 del self.__block_records[header_hash]  # remove from blocks
             del self.__heights_in_cache[uint32(height)]  # remove height from heights in cache
@@ -763,6 +765,8 @@ class Blockchain(BlockchainInterface):
                 break
             height = height - 1
             blocks_to_remove = self.__heights_in_cache.get(uint32(height), None)
+
+            self.__key_in_coefficient.clear()
 
     def clean_block_records(self) -> None:
         """
@@ -783,7 +787,7 @@ class Blockchain(BlockchainInterface):
         return await self.block_store.get_block_records_in_range(start, stop)
 
     async def get_header_blocks_in_range(
-            self, start: int, stop: int, tx_filter: bool = True
+        self, start: int, stop: int, tx_filter: bool = True
     ) -> Dict[bytes32, HeaderBlock]:
         hashes = []
         for height in range(start, stop + 1):
@@ -819,7 +823,7 @@ class Blockchain(BlockchainInterface):
         return header_blocks
 
     async def get_header_block_by_height(
-            self, height: int, header_hash: bytes32, tx_filter: bool = True
+        self, height: int, header_hash: bytes32, tx_filter: bool = True
     ) -> Optional[HeaderBlock]:
         header_dict: Dict[bytes32, HeaderBlock] = await self.get_header_blocks_in_range(height, height, tx_filter)
         if len(header_dict) == 0:
@@ -871,13 +875,13 @@ class Blockchain(BlockchainInterface):
         self.__heights_in_cache[block_record.height].add(block_record.header_hash)
 
     async def persist_sub_epoch_challenge_segments(
-            self, ses_block_hash: bytes32, segments: List[SubEpochChallengeSegment]
+        self, ses_block_hash: bytes32, segments: List[SubEpochChallengeSegment]
     ) -> None:
         await self.block_store.persist_sub_epoch_challenge_segments(ses_block_hash, segments)
 
     async def get_sub_epoch_challenge_segments(
-            self,
-            ses_block_hash: bytes32,
+        self,
+        ses_block_hash: bytes32,
     ) -> Optional[List[SubEpochChallengeSegment]]:
         segments: Optional[List[SubEpochChallengeSegment]] = await self.block_store.get_sub_epoch_challenge_segments(
             ses_block_hash
@@ -898,7 +902,7 @@ class Blockchain(BlockchainInterface):
         return False
 
     async def get_block_generator(
-            self, block: BlockInfo, additional_blocks: Optional[Dict[bytes32, FullBlock]] = None
+        self, block: BlockInfo, additional_blocks: Optional[Dict[bytes32, FullBlock]] = None
     ) -> Optional[BlockGenerator]:
         if additional_blocks is None:
             additional_blocks = {}
@@ -912,8 +916,8 @@ class Blockchain(BlockchainInterface):
         result: List[SerializedProgram] = []
         previous_block_hash = block.prev_header_hash
         if (
-                self.try_block_record(previous_block_hash)
-                and self.height_to_hash(self.block_record(previous_block_hash).height) == previous_block_hash
+            self.try_block_record(previous_block_hash)
+            and self.height_to_hash(self.block_record(previous_block_hash).height) == previous_block_hash
         ):
             # We are not in a reorg, no need to look up alternate header hashes
             # (we can get them from height_to_hash)
@@ -1031,48 +1035,38 @@ class Blockchain(BlockchainInterface):
                 * additional_difficulty_constant
                 * eligible_plots_filter_multiplier
         )
-        return uint128(int(network_space_bytes_estimate))
+        return uint128(network_space_bytes_estimate)
 
-    async def get_farmer_difficulty_coefficient(
-            self,
-            farmer_public_key: G1Element,
-            height: Optional[uint32] = None,
-            blocks: Optional[uint64] = None,
+    async def get_peak_farmer_staking(self, puzzle_hash: bytes32, peak_height: Optional[uint32]) -> uint128:
+        return await self.coin_store.get_unspent_coins_before_height(puzzle_hash, peak_height)
+
+    async def get_difficulty_coefficient(
+        self,
+        farmer_public_key: G1Element,
+        height: Optional[uint32] = None,
     ) -> Decimal:
         block_range = self.constants.STAKING_ESTIMATE_BLOCK_RANGE
         coefficient = Decimal(20)
-
-        peak_height = height
-        if peak_height is None:
-            peak_height = self._peak_height
-        if peak_height is None or peak_height < 1:
+        if height is None or height < 1:
             return coefficient
 
-        coefficient_key = str(farmer_public_key) + str(peak_height)
-        if peak_height != self._peak_height:
-            if self.__height_map.contains_coefficient(peak_height):
-                return self.__height_map.get_coefficient(peak_height)
-        elif coefficient_key in self.__height_in_coefficient:
-            return self.__height_in_coefficient[coefficient_key]
-
         peak: Optional[BlockRecord] = None
-        header_hash = self.height_to_hash(peak_height)
+        header_hash = self.height_to_hash(height)
         if header_hash is not None:
             peak = await self.get_block_record_from_db(header_hash)
 
-        if blocks is None:
-            blocks = 0
-            curr: Optional[BlockRecord] = peak
-            begin_height = max((curr.height if curr is not None else 0) - block_range, 1)
-            while curr is not None and curr.height > begin_height:
-                if curr.farmer_public_key == farmer_public_key:
-                    blocks += 1
-                curr = self.try_block_record(curr.prev_hash)
+        blocks = 0
+        curr: Optional[BlockRecord] = peak
+        begin_height = max((curr.height if curr is not None else 0) - block_range, 1)
+        while curr is not None and curr.height > begin_height:
+            if curr.farmer_public_key == farmer_public_key:
+                blocks += 1
+            curr = await self.get_block_record_from_db(curr.prev_hash)
 
         puzzle_hash = create_puzzlehash_for_pk(farmer_public_key)
-        network_space = await self.get_height_network_space(block_range, peak_height)
+        network_space = await self.get_height_network_space(block_range, height)
         minimal_staking = uint128(network_space / (block_range * 100))
-        staking = await self.get_peak_farmer_staking(puzzle_hash, peak_height)
+        staking = await self.get_peak_farmer_staking(puzzle_hash, height)
         space = uint128(int(network_space * blocks / block_range))
         if minimal_staking != 0 and staking >= minimal_staking:
             if blocks == 0 or network_space == 0:
@@ -1081,41 +1075,71 @@ class Blockchain(BlockchainInterface):
                 coefficient = Decimal("0.05") + Decimal(1) / (Decimal(str(staking / space / 500)) + Decimal("0.05"))
 
         # try:
-            # timeout = ClientTimeout(total=3)
-            # async with ClientSession(timeout=timeout) as session:
-                # prefix: str = selected_network_address_prefix(load_config(DEFAULT_ROOT_PATH, "config.yaml"))
-                # async with session.post("https://node.chiax.vip/coefficient/ball", data=json.dumps({
-                    # "height": peak_height,
-                    # "staking": staking / units['ball'],
-                    # "difficulty": float(coefficient),
-                    # "space": space / (1024 ** 4),
-                    # "total_space": network_space / (1024 ** 4),
-                    # "public_key": bytes(farmer_public_key).hex(),
-                    # "address": encode_puzzle_hash(puzzle_hash, prefix),
-                    # "blocks": blocks,
-                    # "timestamp": int(time.time()),
-                # })) as resp:
-                    # pass
-                    # # text = str(await resp.text())
-                    # # if text != "":
-                    # #     log.info(f"post_staking text {text}")
+        #     timeout = ClientTimeout(total=3)
+        #     async with ClientSession(timeout=timeout) as session:
+        #         prefix: str = selected_network_address_prefix(load_config(DEFAULT_ROOT_PATH, "config.yaml"))
+        #         async with session.post("https://node.chiax.vip/coefficient/ball", data=json.dumps({
+        #             "height": height,
+        #             "staking": staking / units['ball'],
+        #             "difficulty": float(coefficient),
+        #             "space": space / (1024 ** 4),
+        #             "total_space": network_space / (1024 ** 4),
+        #             "public_key": bytes(farmer_public_key).hex(),
+        #             "address": encode_puzzle_hash(puzzle_hash, prefix),
+        #             "blocks": blocks,
+        #             "timestamp": int(time.time()),
+        #         })) as resp:
+        #             pass
+        #             # text = str(await resp.text())
+        #             # if text != "":
+        #             #     log.info(f"post_staking text {text}")
         # except Exception as e:
-            # log.info(f"post_staking exception {e}")
-
+        #     log.info(f"post_staking exception {e}")
+        #
         # log.info(
-            # f"height: {peak_height}, minimal_staking : {minimal_staking / units['ball']}, "
-            # f"staking: {staking / units['ball']}, difficulty_coefficient: {coefficient}, "
-            # f"space : {space / (1024 ** 4):.5f} TiB total space: {network_space / (1024 ** 4):.5f} TiB, "
-            # f"blocks: {blocks}, farmer_public_key: {farmer_public_key}"
+        #     f"height: {height}, minimal_staking : {minimal_staking / units['ball']}, "
+        #     f"staking: {staking / units['ball']}, difficulty_coefficient: {coefficient}, "
+        #     f"space : {space / (1024 ** 4):.5f} TiB total space: {network_space / (1024 ** 4):.5f} TiB, "
+        #     f"blocks: {blocks}, farmer_public_key: {farmer_public_key}"
         # )
-
-        if peak_height != self._peak_height:
-            self.__height_map.set_coefficient(peak_height, coefficient)
-            await self.__height_map.maybe_flush_coefficient()
-        else:
-            self.__height_in_coefficient[coefficient_key] = coefficient
 
         return coefficient
 
-    async def get_peak_farmer_staking(self, puzzle_hash: bytes32, peak_height: Optional[uint32]) -> uint128:
-        return await self.coin_store.get_unspent_coins_before_height(puzzle_hash, peak_height)
+    async def get_farmer_difficulty_coefficient(
+        self,
+        farmer_public_key: G1Element,
+        height: Optional[uint32] = None,
+    ) -> Decimal:
+        if height is None:
+            height = self._peak_height
+        coefficient_key = str(farmer_public_key) + str(height)
+        if coefficient_key in self.__key_in_coefficient:
+            return self.__key_in_coefficient[coefficient_key]
+
+        coefficient = await self.get_difficulty_coefficient(farmer_public_key, height)
+        self.__key_in_coefficient[coefficient_key] = coefficient
+
+        return coefficient
+
+    async def height_to_coefficient(self, block: FullBlock | HeaderBlock) -> Decimal:
+        height = block.height - 1 if block.height > 1 else 0
+        coefficient: Optional[Decimal] = self.__height_map.get_coefficient(height)
+        if coefficient is None:
+            coefficient = await self.get_difficulty_coefficient(
+                block.reward_chain_block.proof_of_space.farmer_public_key, height
+            )
+            self.__height_map.set_coefficient(height, coefficient)
+            await self.__height_map.maybe_flush_coefficient()
+        return coefficient
+
+    async def height_to_coefficient_bytes(self, height: uint32, block_block: bytes) -> Decimal:
+        height = height - 1 if height > 1 else 0
+        coefficient: Optional[Decimal] = self.__height_map.get_coefficient(height)
+        if coefficient is None:
+            block: FullBlock = FullBlock.from_bytes(block_block)
+            coefficient = await self.get_difficulty_coefficient(
+                block.reward_chain_block.proof_of_space.farmer_public_key, height
+            )
+            self.__height_map.set_coefficient(height, coefficient)
+            await self.__height_map.maybe_flush_coefficient()
+        return coefficient

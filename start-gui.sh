@@ -16,7 +16,7 @@ if [ -d  "${SCRIPT_DIR}/.n" ]; then
 fi
 
 if [ -z "$VIRTUAL_ENV" ]; then
-  echo "This requires the ballcoin python virtual environment."
+  echo "This requires the ball python virtual environment."
   echo "Execute '. ./activate' before running."
   exit 1
 fi

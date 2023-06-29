@@ -6,35 +6,38 @@ from typing import Any, Dict, List, Optional, Tuple
 from clvm.casts import int_from_bytes
 from clvm_tools.binutils import disassemble
 
-from ball.types.blockchain_format.program import Program, SerializedProgram
+from ball.types.blockchain_format.program import Program
+from ball.types.blockchain_format.serialized_program import SerializedProgram
 from ball.types.blockchain_format.sized_bytes import bytes32
+from ball.util.bech32m import encode_puzzle_hash
 from ball.util.ints import uint16, uint64
 from ball.wallet.nft_wallet.nft_info import NFTCoinInfo, NFTInfo
 from ball.wallet.nft_wallet.uncurry_nft import UncurriedNFT
 from ball.wallet.puzzles.load_clvm import load_clvm_maybe_recompile
 from ball.wallet.puzzles.p2_delegated_puzzle_or_hidden_puzzle import solution_for_conditions
+from ball.wallet.util.address_type import AddressType
 
 log = logging.getLogger(__name__)
-SINGLETON_TOP_LAYER_MOD = load_clvm_maybe_recompile("singleton_top_layer_v1_1.clvm")
-LAUNCHER_PUZZLE = load_clvm_maybe_recompile("singleton_launcher.clvm")
-NFT_STATE_LAYER_MOD = load_clvm_maybe_recompile("nft_state_layer.clvm")
+SINGLETON_TOP_LAYER_MOD = load_clvm_maybe_recompile("singleton_top_layer_v1_1.clsp")
+LAUNCHER_PUZZLE = load_clvm_maybe_recompile("singleton_launcher.clsp")
+NFT_STATE_LAYER_MOD = load_clvm_maybe_recompile("nft_state_layer.clsp")
 LAUNCHER_PUZZLE_HASH = LAUNCHER_PUZZLE.get_tree_hash()
 SINGLETON_MOD_HASH = SINGLETON_TOP_LAYER_MOD.get_tree_hash()
 NFT_STATE_LAYER_MOD_HASH = NFT_STATE_LAYER_MOD.get_tree_hash()
-NFT_METADATA_UPDATER = load_clvm_maybe_recompile("nft_metadata_updater_default.clvm")
-NFT_OWNERSHIP_LAYER = load_clvm_maybe_recompile("nft_ownership_layer.clvm")
+NFT_METADATA_UPDATER = load_clvm_maybe_recompile("nft_metadata_updater_default.clsp")
+NFT_OWNERSHIP_LAYER = load_clvm_maybe_recompile("nft_ownership_layer.clsp")
 NFT_OWNERSHIP_LAYER_HASH = NFT_OWNERSHIP_LAYER.get_tree_hash()
 NFT_TRANSFER_PROGRAM_DEFAULT = load_clvm_maybe_recompile(
-    "nft_ownership_transfer_program_one_way_claim_with_royalties.clvm",
+    "nft_ownership_transfer_program_one_way_claim_with_royalties.clsp",
 )
-STANDARD_PUZZLE_MOD = load_clvm_maybe_recompile("p2_delegated_puzzle_or_hidden_puzzle.clvm")
-INTERMEDIATE_LAUNCHER_MOD = load_clvm_maybe_recompile("nft_intermediate_launcher.clvm")
+STANDARD_PUZZLE_MOD = load_clvm_maybe_recompile("p2_delegated_puzzle_or_hidden_puzzle.clsp")
+INTERMEDIATE_LAUNCHER_MOD = load_clvm_maybe_recompile("nft_intermediate_launcher.clsp")
 
 
 def create_nft_layer_puzzle_with_curry_params(
     metadata: Program, metadata_updater_hash: bytes32, inner_puzzle: Program
 ) -> Program:
-    """Curries params into nft_state_layer.clvm
+    """Curries params into nft_state_layer.clsp
 
     Args to curry:
         NFT_STATE_LAYER_MOD_HASH
@@ -80,7 +83,7 @@ def create_full_puzzle(
 
 
 async def get_nft_info_from_puzzle(
-    nft_coin_info: NFTCoinInfo, config: Dict = None, ignore_size_limit: bool = False
+    nft_coin_info: NFTCoinInfo, config: Dict[str, Any], ignore_size_limit: bool = False
 ) -> NFTInfo:
     """
     Extract NFT info from a full puzzle
@@ -103,8 +106,10 @@ async def get_nft_info_from_puzzle(
         license_uris.append(str(uri, "utf-8"))
     off_chain_metadata: Optional[str] = None
     nft_info = NFTInfo(
+        encode_puzzle_hash(uncurried_nft.singleton_launcher_id, prefix=AddressType.NFT.hrp(config=config)),
         uncurried_nft.singleton_launcher_id,
         nft_coin_info.coin.name(),
+        nft_coin_info.latest_height,
         uncurried_nft.owner_did,
         uncurried_nft.trade_price_percentage,
         uncurried_nft.royalty_address,
@@ -130,9 +135,9 @@ async def get_nft_info_from_puzzle(
 
 def metadata_to_program(metadata: Dict[bytes, Any]) -> Program:
     """
-    Convert the metadata dict to a Balllisp program
+    Convert the metadata dict to a Chialisp program
     :param metadata: User defined metadata
-    :return: Balllisp program
+    :return: Chialisp program
     """
     kv_list = []
     for key, value in metadata.items():
@@ -144,7 +149,7 @@ def metadata_to_program(metadata: Dict[bytes, Any]) -> Program:
 def program_to_metadata(program: Program) -> Dict[bytes, Any]:
     """
     Convert a program to a metadata dict
-    :param program: Balllisp program contains the metadata
+    :param program: Chialisp program contains the metadata
     :return: Metadata dict
     """
     metadata = {}

@@ -3,4 +3,5 @@
 
 set -e
 
-unlink /usr/bin/ballcoin || true
+unlink /usr/bin/ball || true
+unlink /usr/bin/ballcoin-blockchain || true

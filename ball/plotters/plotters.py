@@ -1,12 +1,15 @@
+from __future__ import annotations
+
 import argparse
 import binascii
 import os
 from enum import Enum
+from pathlib import Path
+from typing import Any, Dict, Optional
+
 from ball.plotters.bladebit import get_bladebit_install_info, plot_bladebit
 from ball.plotters.chiapos import get_chiapos_install_info, plot_ball
 from ball.plotters.madmax import get_madmax_install_info, plot_madmax
-from pathlib import Path
-from typing import Any, Dict, Optional
 
 
 class Options(Enum):
@@ -48,7 +51,7 @@ class Options(Enum):
     BLADEBIT_NO_T2_DIRECT = 36
 
 
-ball_plotter_options = [
+chia_plotter_options = [
     Options.TMP_DIR,
     Options.TMP_DIR2,
     Options.K,
@@ -88,7 +91,7 @@ madmax_plotter_options = [
     Options.FINAL_DIR,
 ]
 
-bladebit_plotter_options = [
+bladebit_ram_plotter_options = [
     Options.NUM_THREADS,
     Options.PLOT_COUNT,
     Options.FARMERKEY,
@@ -97,12 +100,13 @@ bladebit_plotter_options = [
     Options.ID,
     Options.BLADEBIT_WARMSTART,
     Options.BLADEBIT_NONUMA,
+    Options.BLADEBIT_NO_CPU_AFFINITY,
     Options.VERBOSE,
     Options.CONNECT_TO_DAEMON,
     Options.FINAL_DIR,
 ]
 
-bladebit2_plotter_options = [
+bladebit_disk_plotter_options = [
     Options.NUM_THREADS,
     Options.PLOT_COUNT,
     Options.FARMERKEY,
@@ -435,18 +439,32 @@ def call_plotters(root_path: Path, args):
     plotters = argparse.ArgumentParser("ball plotters", description="Available options.")
     subparsers = plotters.add_subparsers(help="Available options", dest="plotter")
 
-    build_parser(subparsers, root_path, ball_plotter_options, "chiapos", "Create a plot with the default ball plotter")
+    build_parser(subparsers, root_path, chia_plotter_options, "chiapos", "Create a plot with the default ball plotter")
     build_parser(subparsers, root_path, madmax_plotter_options, "madmax", "Create a plot with madMAx")
-    build_parser(subparsers, root_path, bladebit_plotter_options, "bladebit", "Create a plot with bladebit")
-    build_parser(subparsers, root_path, bladebit2_plotter_options, "bladebit2", "Create a plot with bladebit2")
+
+    bladebit_parser = subparsers.add_parser("bladebit", help="Create a plot with bladebit")
+    subparsers_bb = bladebit_parser.add_subparsers(dest="plot_type", required=True)
+    build_parser(subparsers_bb, root_path, bladebit_ram_plotter_options, "ramplot", "Create a plot using RAM")
+    build_parser(subparsers_bb, root_path, bladebit_disk_plotter_options, "diskplot", "Create a plot using disk")
+
+    subparsers.add_parser("version", help="Show plotter versions")
 
     deprecation_warning = (
         "[DEPRECATED] 'ball plotters install' is no longer available. Use install-plotter.sh/ps1 instead."
     )
-    install_parser = subparsers.add_parser("install", help=deprecation_warning)
-    install_parser.add_argument("install_plotter", type=str, nargs="*")
+    subparsers.add_parser("install", help=deprecation_warning, add_help=False)
 
-    subparsers.add_parser("version", help="Show plotter versions")
+    deprecation_warning_bb2 = "[DEPRECATED] 'ball plotters bladebit2' was integrated to 'ball plotters bladebit'"
+    subparsers.add_parser("bladebit2", help=deprecation_warning_bb2, add_help=False)
+
+    known_args = plotters.parse_known_args(args)
+    maybe_plotter = vars(known_args[0]).get("plotter")
+    if maybe_plotter == "install":
+        print(deprecation_warning)
+        return
+    elif maybe_plotter == "bladebit2":
+        print(deprecation_warning_bb2)
+        return
 
     args = plotters.parse_args(args)
 
@@ -456,12 +474,10 @@ def call_plotters(root_path: Path, args):
         plot_ball(args, ball_root_path)
     elif args.plotter == "madmax":
         plot_madmax(args, ball_root_path, root_path)
-    elif args.plotter.startswith("bladebit"):
+    elif args.plotter == "bladebit":
         plot_bladebit(args, ball_root_path, root_path)
     elif args.plotter == "version":
         show_plotters_version(ball_root_path)
-    elif args.plotter == "install":
-        print(deprecation_warning)
 
 
 def get_available_plotters(root_path) -> Dict[str, Any]:

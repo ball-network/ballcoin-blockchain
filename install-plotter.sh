@@ -75,7 +75,7 @@ if [ "$1" = "-h" ] || [ -z "$1" ]; then
   exit 0
 fi
 
-DEFAULT_BLADEBIT_VERSION="v2.0.0"
+DEFAULT_BLADEBIT_VERSION="v2.0.1"
 DEFAULT_MADMAX_VERSION="0.0.2"
 VERSION=
 PLOTTER=$1
@@ -100,7 +100,7 @@ if [ "${SCRIPT_DIR}" != "$(pwd)" ]; then
 fi
 
 if [ -z "$VIRTUAL_ENV" ]; then
-  echo "This requires the ballcoin python virtual environment."
+  echo "This requires the ball python virtual environment."
   echo "Execute '. ./activate' before running."
   exit 1
 fi

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pathlib
 import sys
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from ball.introducer.introducer import Introducer
 from ball.introducer.introducer_api import IntroducerAPI
@@ -20,7 +20,7 @@ SERVICE_NAME = "introducer"
 
 def create_introducer_service(
     root_path: pathlib.Path,
-    config: Dict,
+    config: Dict[str, Any],
     advertised_port: Optional[int] = None,
     connect_to_daemon: bool = True,
 ) -> Service[Introducer]:
@@ -39,7 +39,6 @@ def create_introducer_service(
         peer_api=node__api,
         node_type=NodeType.INTRODUCER,
         service_name=SERVICE_NAME,
-        server_listen_ports=[service_config["port"]],
         network_id=network_id,
         advertised_port=advertised_port,
         connect_to_daemon=connect_to_daemon,

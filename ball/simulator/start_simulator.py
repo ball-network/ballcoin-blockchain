@@ -1,21 +1,23 @@
+from __future__ import annotations
+
 import logging
 import sys
 from multiprocessing import freeze_support
 from pathlib import Path
-from typing import Optional, Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from ball.full_node.full_node import FullNode
 from ball.server.outbound_message import NodeType
 from ball.server.start_service import Service, async_run
+from ball.simulator.block_tools import BlockTools, test_constants
+from ball.simulator.full_node_simulator import FullNodeSimulator
 from ball.simulator.simulator_full_node_rpc_api import SimulatorFullNodeRpcApi
 from ball.types.blockchain_format.sized_bytes import bytes32
 from ball.util.bech32m import decode_puzzle_hash
 from ball.util.ball_logging import initialize_logging
-from ball.util.config import load_config_cli, override_config, load_config
+from ball.util.config import load_config, load_config_cli, override_config
 from ball.util.default_root import DEFAULT_ROOT_PATH
-from ball.simulator.block_tools import BlockTools, test_constants
 from ball.util.ints import uint16
-from ball.simulator.full_node_simulator import FullNodeSimulator
 
 # See: https://bugs.python.org/issue29288
 "".encode("idna")
@@ -52,7 +54,6 @@ def create_full_node_simulator_service(
         node_type=NodeType.FULL_NODE,
         advertised_port=service_config["port"],
         service_name=SERVICE_NAME,
-        server_listen_ports=[service_config["port"]],
         on_connect_callback=node.on_connect,
         network_id=network_id,
         rpc_info=(SimulatorFullNodeRpcApi, service_config["rpc_port"]),
@@ -82,7 +83,7 @@ async def async_main(test_mode: bool = False, automated_testing: bool = False, r
             "full_node.selected_network": "testnet0",
             "full_node.database_path": service_config["simulator_database_path"],
             "full_node.peers_file_path": service_config["simulator_peers_file_path"],
-            "full_node.introducer_peer": {"host": "127.0.0.1", "port": 58555},
+            "full_node.introducer_peer": {"host": "127.0.0.1", "port": 38985},
         }
     overrides["simulator.use_current_time"] = True
 

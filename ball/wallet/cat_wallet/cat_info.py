@@ -1,10 +1,12 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 from ball.types.blockchain_format.program import Program
 from ball.types.blockchain_format.sized_bytes import bytes32
-from ball.wallet.lineage_proof import LineageProof
 from ball.util.streamable import Streamable, streamable
+from ball.wallet.lineage_proof import LineageProof
 
 
 @streamable

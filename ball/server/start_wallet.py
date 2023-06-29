@@ -1,19 +1,22 @@
-import pathlib
+from __future__ import annotations
+
 import os
-from multiprocessing import freeze_support
+import pathlib
 import sys
-from typing import Dict, Optional
+from multiprocessing import freeze_support
+from typing import Any, Dict, Optional
 
 from ball.consensus.constants import ConsensusConstants
 from ball.consensus.default_constants import DEFAULT_CONSTANTS
 from ball.rpc.wallet_rpc_api import WalletRpcApi
 from ball.server.outbound_message import NodeType
 from ball.server.start_service import RpcInfo, Service, async_run
-from ball.types.peer_info import PeerInfo
+from ball.types.peer_info import UnresolvedPeerInfo
 from ball.util.ball_logging import initialize_service_logging
-from ball.util.config import load_config_cli, load_config
+from ball.util.config import load_config, load_config_cli
 from ball.util.default_root import DEFAULT_ROOT_PATH
 from ball.util.keychain import Keychain
+from ball.util.task_timing import maybe_manage_task_instrumentation
 from ball.wallet.wallet_node import WalletNode
 
 # See: https://bugs.python.org/issue29288
@@ -26,7 +29,7 @@ SERVICE_NAME = "wallet"
 
 def create_wallet_service(
     root_path: pathlib.Path,
-    config: Dict,
+    config: Dict[str, Any],
     consensus_constants: ConsensusConstants,
     keychain: Optional[Keychain] = None,
     connect_to_daemon: bool = True,
@@ -35,14 +38,9 @@ def create_wallet_service(
 
     overrides = service_config["network_overrides"]["constants"][service_config["selected_network"]]
     updated_constants = consensus_constants.replace_str_to_bytes(**overrides)
-    # add local node to trusted peers if old config
-    if "trusted_peers" not in service_config:
-        full_node_config = config["full_node"]
-        trusted_peer = full_node_config["ssl"]["public_crt"]
-        service_config["trusted_peers"] = {}
-        service_config["trusted_peers"]["local_node"] = trusted_peer
     if "short_sync_blocks_behind_threshold" not in service_config:
         service_config["short_sync_blocks_behind_threshold"] = 20
+
     node = WalletNode(
         service_config,
         root_path,
@@ -51,13 +49,8 @@ def create_wallet_service(
     )
     peer_api = WalletNodeAPI(node)
     fnp = service_config.get("full_node_peer")
+    connect_peers = set() if fnp is None else {UnresolvedPeerInfo(fnp["host"], fnp["port"])}
 
-    if fnp:
-        connect_peers = [PeerInfo(fnp["host"], fnp["port"])]
-        node.full_node_peer = PeerInfo(fnp["host"], fnp["port"])
-    else:
-        connect_peers = []
-        node.full_node_peer = None
     network_id = service_config["selected_network"]
     rpc_port = service_config.get("rpc_port")
     rpc_info: Optional[RpcInfo] = None
@@ -65,11 +58,11 @@ def create_wallet_service(
         rpc_info = (WalletRpcApi, service_config["rpc_port"])
 
     return Service(
-        server_listen_ports=[service_config["port"]],
         root_path=root_path,
         config=config,
         node=node,
         peer_api=peer_api,
+        listen=False,
         node_type=NodeType.WALLET,
         service_name=SERVICE_NAME,
         on_connect_callback=node.on_connect,
@@ -88,7 +81,7 @@ async def async_main() -> int:
     config[SERVICE_NAME] = service_config
 
     # This is simulator
-    local_test = service_config["testing"]
+    local_test = service_config.get("testing", False)
     if local_test is True:
         from ball.simulator.block_tools import test_constants
 
@@ -108,13 +101,9 @@ async def async_main() -> int:
 
 def main() -> int:
     freeze_support()
-    if os.getenv("BALL_INSTRUMENT_WALLET", 0) != 0:
-        from ball.util.task_timing import start_task_instrumentation, stop_task_instrumentation
-        import atexit
 
-        start_task_instrumentation()
-        atexit.register(stop_task_instrumentation)
-    return async_run(async_main())
+    with maybe_manage_task_instrumentation(enable=os.environ.get("BALL_INSTRUMENT_WALLET") is not None):
+        return async_run(async_main())
 
 
 if __name__ == "__main__":

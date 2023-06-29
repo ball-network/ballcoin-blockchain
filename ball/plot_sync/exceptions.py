@@ -4,7 +4,7 @@ from typing import Any
 
 from ball.plot_sync.util import ErrorCodes, State
 from ball.protocols.harvester_protocol import PlotSyncIdentifier
-from ball.server.ws_connection import NodeType
+from ball.server.outbound_message import NodeType
 from ball.util.ints import uint64
 
 

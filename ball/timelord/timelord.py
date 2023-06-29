@@ -11,18 +11,18 @@ import time
 import traceback
 from concurrent.futures import ProcessPoolExecutor
 from decimal import Decimal
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from chiavdf import create_discriminant, prove
 
-import ball.server.ws_connection as ws
 from ball.consensus.constants import ConsensusConstants
 from ball.consensus.pot_iterations import calculate_sp_iters, is_overflow_block
 from ball.protocols import timelord_protocol
 from ball.protocols.protocol_message_types import ProtocolMessageTypes
-from ball.rpc.rpc_server import default_get_connections
+from ball.rpc.rpc_server import StateChangedProtocol, default_get_connections
 from ball.server.outbound_message import NodeType, make_msg
 from ball.server.server import BallServer
+from ball.server.ws_connection import WSBallConnection
 from ball.timelord.iters_from_block import iters_from_block
 from ball.timelord.timelord_state import LastState
 from ball.timelord.types import Chain, IterationType, StateType
@@ -96,8 +96,6 @@ class Timelord:
         self.allows_iters: List[Chain] = []
         # Last peak received, None if it's already processed.
         self.new_peak: Optional[timelord_protocol.NewPeakTimelord] = None
-        # Last end of subslot bundle, None if we built a peak on top of it.
-        self.new_subslot_end: Optional[EndOfSubSlotBundle] = None
         # Last state received. Can either be a new peak or a new EndOfSubslotBundle.
         # Unfinished block info, iters adjusted to the last peak.
         self.unfinished_blocks: List[timelord_protocol.NewUnfinishedBlockTimelord] = []
@@ -129,7 +127,7 @@ class Timelord:
         self.vdf_failure_time: float = 0
         self.total_unfinished: int = 0
         self.total_infused: int = 0
-        self.state_changed_callback: Optional[Callable] = None
+        self.state_changed_callback: Optional[StateChangedProtocol] = None
         self.bluebox_mode = self.config.get("bluebox_mode", False)
         # Support backwards compatibility for the old `config.yaml` that has field `sanitizer_mode`.
         if not self.bluebox_mode:
@@ -169,7 +167,7 @@ class Timelord:
     def get_connections(self, request_node_type: Optional[NodeType]) -> List[Dict[str, Any]]:
         return default_get_connections(server=self.server, request_node_type=request_node_type)
 
-    async def on_connect(self, connection: ws.WSBallConnection):
+    async def on_connect(self, connection: WSBallConnection):
         pass
 
     def get_vdf_server_port(self) -> Optional[uint16]:
@@ -189,7 +187,7 @@ class Timelord:
     async def _await_closed(self):
         pass
 
-    def _set_state_changed_callback(self, callback: Callable):
+    def _set_state_changed_callback(self, callback: StateChangedProtocol) -> None:
         self.state_changed_callback = callback
 
     def state_changed(self, change: str, change_data: Optional[Dict[str, Any]] = None):
@@ -232,13 +230,14 @@ class Timelord:
         difficulty = self.last_state.get_difficulty()
         ip_iters = self.last_state.get_last_ip()
         rc_block = block.reward_chain_block
+        difficulty_coefficient = Decimal(block.difficulty_coefficient)
         try:
             block_sp_iters, block_ip_iters = iters_from_block(
                 self.constants,
                 rc_block,
                 sub_slot_iters,
                 difficulty,
-                Decimal(block.difficulty_coefficient),  # staking
+                difficulty_coefficient,  # staking
             )
         except Exception as e:
             log.warning(f"Received invalid unfinished block: {e}.")
@@ -273,13 +272,6 @@ class Timelord:
                         f"because its iters are too low"
                     )
                 return None
-        fee_ph = block.foliage.foliage_block_data.timelord_fee_puzzle_hash
-        if "ball_target_address" in self.config and fee_ph != decode_puzzle_hash(self.config["ball_target_address"]):
-            log.debug(
-                f"Will not infuse unfinished block {block.rc_prev} sp total iters {block_sp_total_iters}, "
-                f"because another timelord will"
-            )
-            return None
 
         if new_block_iters > 0:
             return new_block_iters
@@ -386,14 +378,6 @@ class Timelord:
         self.new_peak = None
         await self._reset_chains()
 
-    async def _handle_subslot_end(self):
-        self.last_state.set_state(self.new_subslot_end)
-        for block in self.unfinished_blocks:
-            if self._can_infuse_unfinished_block(block) is not None:
-                self.total_unfinished += 1
-        self.new_subslot_end = None
-        await self._reset_chains()
-
     async def _map_chains_with_vdf_clients(self):
         while not self._shut_down:
             picked_chain = None
@@ -486,7 +470,7 @@ class Timelord:
                 rc_challenge = self.last_state.get_challenge(Chain.REWARD_CHAIN)
                 if rc_info.challenge != rc_challenge:
                     assert rc_challenge is not None
-                    log.warning(f"SP: Do not have correct challenge {rc_challenge.hex()}" f" has {rc_info.challenge}")
+                    log.warning(f"SP: Do not have correct challenge {rc_challenge.hex()} has {rc_info.challenge}")
                     # This proof is on an outdated challenge, so don't use it
                     continue
                 if "ball_target_address" in self.config:
@@ -762,7 +746,7 @@ class Timelord:
             rc_challenge = self.last_state.get_challenge(Chain.REWARD_CHAIN)
             if rc_vdf.challenge != rc_challenge:
                 assert rc_challenge is not None
-                log.warning(f"Do not have correct challenge {rc_challenge.hex()} has" f" {rc_vdf.challenge}")
+                log.warning(f"Do not have correct challenge {rc_challenge.hex()} has {rc_vdf.challenge}")
                 # This proof is on an outdated challenge, so don't use it
                 return None
             log.debug("Collected end of subslot vdfs.")
@@ -843,9 +827,12 @@ class Timelord:
                 # No overflow blocks in a new epoch
                 self.unfinished_blocks = []
             self.overflow_blocks = []
-            self.new_subslot_end = eos_bundle
 
-            await self._handle_subslot_end()
+            self.last_state.set_state(eos_bundle)
+            for block in self.unfinished_blocks:
+                if self._can_infuse_unfinished_block(block) is not None:
+                    self.total_unfinished += 1
+            await self._reset_chains()
 
     async def _handle_failures(self):
         if len(self.vdf_failures) > 0:
@@ -872,7 +859,7 @@ class Timelord:
         else:
             # If there were no failures recently trigger a reset after 60 seconds of no activity.
             # Signage points should be every 9 seconds
-            active_time_threshold = 86400
+            active_time_threshold = 60
         if time.time() - self.last_active_time > active_time_threshold:
             log.error(f"Not active for {active_time_threshold} seconds, restarting all chains")
             await self._reset_chains()

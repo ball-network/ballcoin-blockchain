@@ -43,7 +43,7 @@ def create_full_node_crawler_service(
 
     rpc_info: Optional[RpcInfo] = None
     if service_config.get("start_rpc_server", True):
-        rpc_info = (CrawlerRpcApi, service_config.get("rpc_port", 8561))
+        rpc_info = (CrawlerRpcApi, service_config.get("rpc_port", 38886))
 
     return Service(
         root_path=root_path,
@@ -54,7 +54,6 @@ def create_full_node_crawler_service(
         advertised_port=service_config["port"],
         service_name="full_node",
         upnp_ports=[],
-        server_listen_ports=[service_config["port"]],
         on_connect_callback=crawler.on_connect,
         network_id=network_id,
         rpc_info=rpc_info,

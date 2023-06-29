@@ -12,7 +12,7 @@ from blspy import G1Element
 from chiapos import DiskProver
 
 from ball.plotting.util import parse_plot_info
-from ball.types.blockchain_format.proof_of_space import ProofOfSpace
+from ball.types.blockchain_format.proof_of_space import generate_plot_public_key
 from ball.types.blockchain_format.sized_bytes import bytes32
 from ball.util.ints import uint16, uint64
 from ball.util.misc import VersionedBlob
@@ -32,6 +32,7 @@ class DiskCacheEntry(Streamable):
     pool_public_key: Optional[G1Element]
     pool_contract_puzzle_hash: Optional[bytes32]
     plot_public_key: G1Element
+    local_public_key: G1Element
     last_use: uint64
 
 
@@ -48,6 +49,7 @@ class CacheEntry:
     pool_public_key: Optional[G1Element]
     pool_contract_puzzle_hash: Optional[bytes32]
     plot_public_key: G1Element
+    local_public_key: G1Element
     last_use: float
 
     @classmethod
@@ -66,13 +68,16 @@ class CacheEntry:
             assert isinstance(pool_public_key_or_puzzle_hash, bytes32)
             pool_contract_puzzle_hash = pool_public_key_or_puzzle_hash
 
-        local_sk = master_sk_to_local_sk(local_master_sk)
+        local_public_key = master_sk_to_local_sk(local_master_sk).get_g1()
 
-        plot_public_key: G1Element = ProofOfSpace.generate_plot_public_key(
-            local_sk.get_g1(), farmer_public_key, pool_contract_puzzle_hash is not None
+        plot_public_key: G1Element = generate_plot_public_key(
+            local_public_key, farmer_public_key, pool_contract_puzzle_hash is not None
         )
 
-        return cls(prover, farmer_public_key, pool_public_key, pool_contract_puzzle_hash, plot_public_key, time.time())
+        return cls(
+            prover, farmer_public_key, pool_public_key, pool_contract_puzzle_hash,
+            plot_public_key, local_public_key, time.time()
+        )
 
     def bump_last_use(self) -> None:
         self.last_use = time.time()
@@ -113,6 +118,7 @@ class Cache:
                     cache_entry.pool_public_key,
                     cache_entry.pool_contract_puzzle_hash,
                     cache_entry.plot_public_key,
+                    cache_entry.local_public_key,
                     uint64(int(cache_entry.last_use)),
                 )
                 for path, cache_entry in self.items()
@@ -145,12 +151,13 @@ class Cache:
                         cache_entry.pool_public_key,
                         cache_entry.pool_contract_puzzle_hash,
                         cache_entry.plot_public_key,
+                        cache_entry.local_public_key,
                         float(cache_entry.last_use),
                     )
                     # TODO, drop the below entry dropping after few versions or whenever we force a cache recreation.
                     #       it's here to filter invalid cache entries coming from bladebit RAM plotting.
-                    #       Related: - https://github.com/denisio/ball-blockchain/issues/13084
-                    #                - https://github.com/denisio/chiapos/pull/337
+                    #       Related: - https://github.com/Ball-Network/ballcoin-blockchain/issues/13084
+                    #                - https://github.com/Ball-Network/chiapos/pull/337
                     k = new_entry.prover.get_size()
                     if k not in estimated_c2_sizes:
                         estimated_c2_sizes[k] = ceil(2**k / 100_000_000) * ceil(k / 8)
@@ -159,7 +166,7 @@ class Cache:
                     # Estimated C2 size + memo size + 2000 (static data + path)
                     # static data: version(2) + table pointers (<=96) + id(32) + k(1) => ~130
                     # path: up to ~1870, all above will lead to false positive.
-                    # See https://github.com/ball/chiapos/blob/3ee062b86315823dd775453ad320b8be892c7df3/src/prover_disk.hpp#L282-L287  # noqa: E501
+                    # See https://github.com/Ball-Network/chiapos/blob/3ee062b86315823dd775453ad320b8be892c7df3/src/prover_disk.hpp#L282-L287  # noqa: E501
                     if prover_size > (estimated_c2_sizes[k] + memo_size + 2000):
                         log.warning(
                             "Suspicious cache entry dropped. Recommended: stop the harvester, remove "

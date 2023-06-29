@@ -1,6 +1,6 @@
 #
 # Install helper code to manage inserting the correct version for the GUI
-# Gets the version from the result of "ballcoin version"
+# Gets the version from the result of "ball version"
 # Converts to proper symver format so NPM doesn't complain
 # Adds the version info to the package.json file
 #

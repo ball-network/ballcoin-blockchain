@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 from typing import List
 
-from ball.types.blockchain_format.sized_bytes import bytes32
-from ball.types.condition_opcodes import ConditionOpcode
 from ball.types.blockchain_format.program import INFINITE_COST
+from ball.types.blockchain_format.sized_bytes import bytes32
 from ball.types.coin_spend import CoinSpend
+from ball.types.condition_opcodes import ConditionOpcode
 
 
 def compute_coin_hints(cs: CoinSpend) -> List[bytes32]:
