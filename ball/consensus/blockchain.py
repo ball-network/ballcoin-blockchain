@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-import json
 import logging
 import multiprocessing
-import time
 import traceback
 from concurrent.futures import Executor
 from concurrent.futures.process import ProcessPoolExecutor
@@ -15,10 +13,8 @@ from multiprocessing.context import BaseContext
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
-from aiohttp import ClientSession, ClientTimeout
 from blspy import G1Element
 
-from ball.cmds.units import units
 from ball.consensus.block_body_validation import validate_block_body
 from ball.consensus.block_header_validation import validate_unfinished_header_block
 from ball.consensus.block_record import BlockRecord
@@ -53,9 +49,6 @@ from ball.types.header_block import HeaderBlock
 from ball.types.unfinished_block import UnfinishedBlock
 from ball.types.unfinished_header_block import UnfinishedHeaderBlock
 from ball.types.weight_proof import SubEpochChallengeSegment
-from ball.util.bech32m import encode_puzzle_hash
-from ball.util.config import load_config, selected_network_address_prefix
-from ball.util.default_root import DEFAULT_ROOT_PATH
 from ball.util.errors import ConsensusError, Err
 from ball.util.generator_tools import get_block_header, tx_removals_and_additions
 from ball.util.hash import std_hash
@@ -1073,35 +1066,6 @@ class Blockchain(BlockchainInterface):
                 coefficient = Decimal(1)
             else:
                 coefficient = Decimal("0.05") + Decimal(1) / (Decimal(str(staking / space / 500)) + Decimal("0.05"))
-
-        # try:
-        #     timeout = ClientTimeout(total=3)
-        #     async with ClientSession(timeout=timeout) as session:
-        #         prefix: str = selected_network_address_prefix(load_config(DEFAULT_ROOT_PATH, "config.yaml"))
-        #         async with session.post("https://node.chiax.vip/coefficient/ball", data=json.dumps({
-        #             "height": height,
-        #             "staking": staking / units['ball'],
-        #             "difficulty": float(coefficient),
-        #             "space": space / (1024 ** 4),
-        #             "total_space": network_space / (1024 ** 4),
-        #             "public_key": bytes(farmer_public_key).hex(),
-        #             "address": encode_puzzle_hash(puzzle_hash, prefix),
-        #             "blocks": blocks,
-        #             "timestamp": int(time.time()),
-        #         })) as resp:
-        #             pass
-        #             # text = str(await resp.text())
-        #             # if text != "":
-        #             #     log.info(f"post_staking text {text}")
-        # except Exception as e:
-        #     log.info(f"post_staking exception {e}")
-        #
-        # log.info(
-        #     f"height: {height}, minimal_staking : {minimal_staking / units['ball']}, "
-        #     f"staking: {staking / units['ball']}, difficulty_coefficient: {coefficient}, "
-        #     f"space : {space / (1024 ** 4):.5f} TiB total space: {network_space / (1024 ** 4):.5f} TiB, "
-        #     f"blocks: {blocks}, farmer_public_key: {farmer_public_key}"
-        # )
 
         return coefficient
 

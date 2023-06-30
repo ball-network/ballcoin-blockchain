@@ -161,7 +161,6 @@ class HarvesterAPI:
                                 proof_xs,
                                 plot_info.farmer_public_key,
                             )
-                            proof_of_space.set_plot_public_key(plot_info.plot_public_key)
                             responses.append((quality_str, proof_of_space))
                 return responses
             except Exception as e:
