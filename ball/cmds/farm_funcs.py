@@ -166,7 +166,7 @@ async def summary(
                 return
             print("Staking addresses:")
             client: Optional[FullNodeRpcClient]
-            async with get_any_service_client("full_node", rpc_port) as (client, config, _):
+            async with get_any_service_client(FullNodeRpcClient, rpc_port) as (client, config, _):
                 if client is not None:
                     address_prefix = selected_network_address_prefix(config)
                     for k, v in sorted(PlotStats.staking_ph.items(), key=(lambda tup: tup[1]), reverse=True):
