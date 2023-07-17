@@ -3411,7 +3411,6 @@ class WalletRpcApi:
             launcher_hash = launcher_hash[2:]
         if len(launcher_hash) != 64:
             raise ValueError("bad launcher id")
-        launcher_id = bytes32(hexstr_to_bytes(launcher_hash))
         config: Dict = load_config(DEFAULT_ROOT_PATH, "config.yaml")
         client = await FullNodeRpcClient.create(
             config["self_hostname"],
@@ -3424,25 +3423,19 @@ class WalletRpcApi:
         try:
             contract_puzzle_hash: Optional[bytes32] = None
             delay: uint64 = uint64(604800)
-            prefix = selected_network_address_prefix(config)
             if contract_address == "":
-                limit: int = 30
-                while limit < 150:
-                    puzzle_hashes = await self.service.wallet_state_manager.puzzle_store.get_first_puzzle_hashes(limit)
-                    for puzzle_hash in puzzle_hashes:
-                        puzzle = create_p2_singleton_puzzle(SINGLETON_MOD_HASH, launcher_id, delay, puzzle_hash)
-                        status = await client.check_puzzle_hash_coin(puzzle.get_tree_hash())
-                        if status:
-                            contract_puzzle_hash = puzzle.get_tree_hash()
-                            break
-                    limit += 30
-
-                if contract_puzzle_hash is not None:
-                    contract_address = encode_puzzle_hash(contract_puzzle_hash, prefix)
+                prefix = selected_network_address_prefix(config)
+                launcher_id = bytes32.fromhex(launcher_hash)
+                puzzle_hashes = await self.service.wallet_state_manager.puzzle_store.get_all_puzzle_hashes()
+                for puzzle_hash in puzzle_hashes:
+                    puzzle = create_p2_singleton_puzzle(SINGLETON_MOD_HASH, launcher_id, delay, puzzle_hash)
+                    if await client.check_puzzle_hash_coin(puzzle.get_tree_hash()):
+                        contract_puzzle_hash = puzzle.get_tree_hash()
+                        contract_address = encode_puzzle_hash(contract_puzzle_hash, prefix)
+                        break
             else:
-                if contract_address[0: len(prefix)] != prefix:
-                    raise ValueError("Unexpected Address Prefix")
                 contract_puzzle_hash = decode_puzzle_hash(contract_address)
+
             if contract_puzzle_hash is not None:
                 coin_records = await client.get_coin_records_by_puzzle_hash(contract_puzzle_hash, False)
                 for coin_record in coin_records:
@@ -3469,7 +3462,6 @@ class WalletRpcApi:
             launcher_hash = launcher_hash[2:]
         if len(launcher_hash) != 64:
             raise ValueError("bad launcher id")
-        launcher_id = bytes32(hexstr_to_bytes(launcher_hash))
         config: Dict = load_config(DEFAULT_ROOT_PATH, "config.yaml")
         client = await FullNodeRpcClient.create(
             config["self_hostname"],
@@ -3480,52 +3472,40 @@ class WalletRpcApi:
         data = {"contract_address": "", "status": ""}
         try:
             contract_puzzle_hash: Optional[bytes32] = None
-            puzzle: Optional[Program] = None
+            program_puzzle: Optional[Program] = None
             delay: uint64 = uint64(604800)
             prefix = selected_network_address_prefix(config)
-            if contract_address == "":
-                limit: int = 30
-                while limit < 150:
-                    puzzle_hashes = await self.service.wallet_state_manager.puzzle_store.get_first_puzzle_hashes(limit)
-                    for puzzle_hash in puzzle_hashes:
-                        puzzle = create_p2_singleton_puzzle(SINGLETON_MOD_HASH, launcher_id, delay, puzzle_hash)
-                        status = await client.check_puzzle_hash_coin(puzzle.get_tree_hash())
-                        if status:
-                            contract_puzzle_hash = puzzle.get_tree_hash()
-                            break
-                    limit += 30
-            else:
-                if contract_address[0: len(prefix)] != prefix:
-                    raise ValueError("Unexpected Address Prefix")
+            launcher_id = bytes32.fromhex(launcher_hash)
+
+            if contract_address != "":
                 contract_puzzle_hash = decode_puzzle_hash(contract_address)
+            puzzle_hashes = await self.service.wallet_state_manager.puzzle_store.get_all_puzzle_hashes()
+            for puzzle_hash in puzzle_hashes:
+                program_puzzle = create_p2_singleton_puzzle(SINGLETON_MOD_HASH, launcher_id, delay, puzzle_hash)
+                if contract_address == "":
+                    if await client.check_puzzle_hash_coin(program_puzzle.get_tree_hash()):
+                        contract_puzzle_hash = program_puzzle.get_tree_hash()
+                        break
+                elif contract_puzzle_hash == program_puzzle.get_tree_hash():
+                    break
+            if program_puzzle is None:
+                assert False, "the nft doesn't belong to you"
+
             coin_spends: List[CoinSpend] = []
             total_amount = 0
             record_amount = 0
-            if contract_puzzle_hash is not None:
-                data["contract_address"] = encode_puzzle_hash(contract_puzzle_hash, prefix)
-                # coins = await client.get_coins_by_puzzle_hash_timestamp(
-                #     contract_puzzle_hash,
-                #     uint64(time.time()) - delay,
-                # )
-                # for c in coins:
-                #     amount = uint64(c.amount)
-                #     coin_spends.append(CoinSpend(
-                #         coin=c,
-                #         puzzle_reveal=SerializedProgram.from_program(puzzle),
-                #         solution=SerializedProgram.from_program(Program.to([amount, 0])),
-                #     ))
-                #     record_amount += amount
-                coin_records = await client.get_coin_records_by_puzzle_hash(contract_puzzle_hash, False)
-                for coin_record in coin_records:
-                    amount = uint64(coin_record.coin.amount)
-                    if coin_record.timestamp <= uint64(time.time()) - delay:
-                        coin_spends.append(CoinSpend(
-                            coin=coin_record.coin,
-                            puzzle_reveal=SerializedProgram.from_program(puzzle),
-                            solution=SerializedProgram.from_program(Program.to([amount, 0])),
-                        ))
-                        record_amount += amount
-                    total_amount += amount
+            data["contract_address"] = encode_puzzle_hash(contract_puzzle_hash, prefix)
+            coin_records = await client.get_coin_records_by_puzzle_hash(contract_puzzle_hash, False)
+            for coin_record in coin_records:
+                amount = uint64(coin_record.coin.amount)
+                if coin_record.timestamp <= uint64(time.time()) - delay:
+                    coin_spends.append(CoinSpend(
+                        coin=coin_record.coin,
+                        puzzle_reveal=SerializedProgram.from_program(program_puzzle),
+                        solution=SerializedProgram.from_program(Program.to([amount, 0])),
+                    ))
+                    record_amount += amount
+                total_amount += amount
             data["num"] = len(coin_spends)
             data["amount"] = record_amount
             data["total_amount"] = total_amount

@@ -358,12 +358,3 @@ class WalletPuzzleStore:
             return uint32(row[0])
 
         return None
-
-    async def get_first_puzzle_hashes(self, limit: int) -> Set[bytes32]:
-        """
-        Return a set containing all puzzle_hashes we generated.
-        """
-        pagination_str = f" LIMIT {limit}"
-        async with self.db_wrapper.reader_no_transaction() as conn:
-            rows = await conn.execute_fetchall(f"SELECT puzzle_hash FROM derivation_paths  ORDER BY derivation_index ASC{pagination_str}")
-            return set(bytes32.fromhex(row[0]) for row in rows)
