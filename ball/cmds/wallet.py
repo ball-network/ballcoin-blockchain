@@ -1163,7 +1163,7 @@ def _delete_notifications(
     "--contract-address",
     help="Set the nft contract address",
     type=str,
-    default=None,
+    default="",
 )
 def recover_cmd(
     wallet_rpc_port: Optional[int],
@@ -1202,7 +1202,7 @@ def recover_cmd(
     "--contract-address",
     help="Set the nft contract address",
     type=str,
-    default=None,
+    default="",
 )
 def recover_cmd(
     wallet_rpc_port: Optional[int],

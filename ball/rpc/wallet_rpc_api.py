@@ -3405,10 +3405,11 @@ class WalletRpcApi:
                 await wallet.push_transaction(tr)
             return {"transaction": transaction, "transaction_id": tr.name}
 
+
     async def find_pool_nft(self, request) -> EndpointResult:
         launcher_hash = request.get("launcher_id", "")
         contract_address = request.get("contract_address", "")
-        if not (len(launcher_hash) == 64 or len(launcher_hash) == 62):
+        if not (len(launcher_hash) == 66 or len(launcher_hash) == 64):
             return {"error": "bad launcher id"}
         config: Dict = load_config(DEFAULT_ROOT_PATH, "config.yaml")
         client = await FullNodeRpcClient.create(
@@ -3422,10 +3423,10 @@ class WalletRpcApi:
         total_amount = 0
         record_amount = 0
         try:
-            contract_ph: Optional[bytes32] = decode_puzzle_hash(contract_address) if contract_address != "" else None
             delay: uint64 = uint64(604800)
-            launcher_id = bytes32.fromhex(launcher_hash)
             program_puzzle: Optional[Program] = None
+            launcher_id = bytes32(hexstr_to_bytes(launcher_hash))
+            contract_ph: Optional[bytes32] = decode_puzzle_hash(contract_address) if contract_address != "" else None
             puzzle_hash: Optional[bytes32] = self.pool_nft_puzzle_hash.get(launcher_id)
             if puzzle_hash is None:
                 puzzle_hashes = await self.service.wallet_state_manager.puzzle_store.get_all_puzzle_hashes()
@@ -3440,7 +3441,8 @@ class WalletRpcApi:
                             self.pool_nft_puzzle_hash[launcher_id] = puzzle_hash
                             program_puzzle = puzzle
                             break
-                    elif contract_ph == puzzle.get_tree_hash():
+                    else:
+                        if contract_ph == puzzle.get_tree_hash():
                             program_puzzle = puzzle
                             self.pool_nft_puzzle_hash[launcher_id] = puzzle_hash
                             break
@@ -3476,10 +3478,8 @@ class WalletRpcApi:
     async def recover_pool_nft(self, request) -> EndpointResult:
         launcher_hash = request.get("launcher_id", "")
         contract_address = request.get("contract_address", "")
-        if launcher_hash.startswith("0x") or launcher_hash.startswith("0X"):
-            launcher_hash = launcher_hash[2:]
-        if len(launcher_hash) != 64:
-            raise ValueError("bad launcher id")
+        if not (len(launcher_hash) == 66 or len(launcher_hash) == 64):
+            return {"error": "bad launcher id"}
         config: Dict = load_config(DEFAULT_ROOT_PATH, "config.yaml")
         client = await FullNodeRpcClient.create(
             config["self_hostname"],
@@ -3491,7 +3491,7 @@ class WalletRpcApi:
         try:
             contract_ph: Optional[bytes32] = decode_puzzle_hash(contract_address) if contract_address != "" else None
             delay: uint64 = uint64(604800)
-            launcher_id = bytes32.fromhex(launcher_hash)
+            launcher_id = bytes32(hexstr_to_bytes(launcher_hash))
             program_puzzle: Optional[Program] = None
             puzzle_hash: Optional[bytes32] = self.pool_nft_puzzle_hash.get(launcher_id)
             if puzzle_hash is None:
