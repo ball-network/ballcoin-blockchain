@@ -70,11 +70,17 @@ async def find_pool_nft(args: dict, wallet_client: WalletRpcClient, fingerprint:
     launcher_id: str = args["launcher_id"]
     contract_address: str = args["contract_address"]
     response = await wallet_client.find_pool_nft(launcher_id, contract_address)
+    if "error" in response:
+        error = response["error"]
+        print(f"Error: {error}")
+        return
     address = response["contract_address"]
+    delayed_puzzle_hash = response["delayed_puzzle_hash"]
     total_amount = response["total_amount"] / units["ball"]
     record_amount = response["record_amount"] / units["ball"]
     balance_amount = response["balance_amount"] / units["ball"]
     print(f"Contract Address: {address}")
+    print(f"Delayed PuzzleHash: {delayed_puzzle_hash}")
     print(f"Total Amount: {total_amount} BALL")
     print(f"Balance Amount: {balance_amount} BALL")
     print(f"Record Amount: {record_amount} BALL")
@@ -84,6 +90,10 @@ async def recover_pool_nft(args: dict, wallet_client: WalletRpcClient, fingerpri
     launcher_id: str = args["launcher_id"]
     contract_address: str = args["contract_address"]
     response = await wallet_client.recover_pool_nft(launcher_id, contract_address)
+    if "error" in response:
+        error = response["error"]
+        print(f"Error: {error}")
+        return
     address = response["contract_address"]
     status = response["status"]
     amount = response["amount"] / units["ball"]

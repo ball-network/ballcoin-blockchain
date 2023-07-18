@@ -607,24 +607,8 @@ class CoinStore:
 
     async def check_puzzle_hash_coin(self, puzzle_hash: bytes32) -> bool:
         async with self.db_wrapper.reader_no_transaction() as conn:
-            existing = await conn.execute_fetchall(
-                "SELECT puzzle_hash FROM coin_record INDEXED BY coin_puzzle_hash WHERE puzzle_hash=? LIMIT ?",
-                (self.maybe_to_hex(puzzle_hash), 1),
-            )
-        return existing is not None
-
-    async def get_coins_by_puzzle_hash_timestamp(
-        self,
-        puzzle_hash: bytes32,
-        timestamp: uint64 = uint64(0),
-    ) -> List[Coin]:
-        coins = set()
-        async with self.db_wrapper.reader_no_transaction() as conn:
             async with conn.execute(
-                f"SELECT puzzle_hash,coin_parent, amount FROM coin_record INDEXED BY coin_puzzle_hash "
-                f"WHERE puzzle_hash=? AND timestamp <= ? AND spent_index=0",
-                (self.maybe_to_hex(puzzle_hash), timestamp),
+                "SELECT puzzle_hash FROM coin_record INDEXED BY coin_puzzle_hash WHERE puzzle_hash=? LIMIT 1",
+                (self.maybe_to_hex(puzzle_hash),),
             ) as cursor:
-                for row in await cursor.fetchall():
-                    coins.add(Coin(self.maybe_from_hex(row[1]), self.maybe_from_hex(row[0]), uint64.from_bytes(row[2])))
-                return list(coins)
+                return await cursor.fetchone() is not None

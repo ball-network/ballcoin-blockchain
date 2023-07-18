@@ -71,6 +71,7 @@ class FullNodeRpcApi:
             "/get_mempool_item_by_tx_id": self.get_mempool_item_by_tx_id,
             # Fee estimation
             "/get_fee_estimate": self.get_fee_estimate,
+            "/check_puzzle_hash_coin": self.check_puzzle_hash_coin,
         }
 
     async def _state_changed(self, change: str, change_data: Optional[Dict[str, Any]] = None) -> List[WsRpcMessage]:
@@ -531,22 +532,6 @@ class FullNodeRpcApi:
         coin_records = await self.service.blockchain.coin_store.get_coin_records_by_puzzle_hash(**kwargs)
 
         return {"coin_records": [coin_record_dict_backwards_compat(cr.to_json_dict()) for cr in coin_records]}
-
-    async def get_coins_by_puzzle_hash_timestamp(self, request: Dict[str, Any]) -> EndpointResult:
-        """
-        Retrieves the coins for a given puzzlehash, by default returns unspent coins.
-        """
-        if "puzzle_hash" not in request:
-            raise ValueError("Puzzle hash not in request")
-        if "timestamp" not in request:
-            raise ValueError("timestamp not in request")
-        kwargs: Dict[str, Any] = {
-            "timestamp": uint64(request["timestamp"]),
-            "puzzle_hash": hexstr_to_bytes(request["puzzle_hash"]),
-        }
-        coins = await self.service.blockchain.coin_store.get_coins_by_puzzle_hash_timestamp(**kwargs)
-
-        return {"coins": [c.to_json_dict() for c in coins]}
 
     async def get_coin_records_by_puzzle_hashes(self, request: Dict[str, Any]) -> EndpointResult:
         """

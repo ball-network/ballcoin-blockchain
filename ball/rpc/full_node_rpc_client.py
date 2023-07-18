@@ -282,13 +282,3 @@ class FullNodeRpcClient(RpcClient):
         except Exception:
             return False
 
-    async def get_coins_by_puzzle_hash_timestamp(
-        self,
-        puzzle_hash: bytes32,
-        timestamp: uint64,
-    ) -> List:
-        d = {"puzzle_hash": puzzle_hash.hex(), "timestamp": timestamp}
-
-        response = await self.fetch("get_coins_by_puzzle_hash_timestamp", d)
-        return [Coin.from_json_dict(coin) for coin in response["coin_records"]]
-
