@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-run_block: Convert an encoded FullBlock from the BallCoin Blockchain into a list of transactions
+run_block: Convert an encoded FullBlock from the BallCoin blockchain into a list of transactions
 
 As input, takes a file containing a [FullBlock](../ball/types/full_block.py) in json format
 
@@ -61,7 +61,7 @@ from ball.wallet.puzzles.load_clvm import load_serialized_clvm_maybe_recompile
 from ball.wallet.uncurried_puzzle import uncurry_puzzle
 
 DESERIALIZE_MOD = load_serialized_clvm_maybe_recompile(
-    "chialisp_deserialisation.clsp", package_or_requirement="ball.wallet.puzzles"
+    "chialisp_deserialisation.clsp", package_or_requirement="ball.consensus.puzzles"
 )
 
 
@@ -104,7 +104,7 @@ def npc_to_dict(npc: NPC):
 
 def run_generator(block_generator: BlockGenerator, constants: ConsensusConstants, max_cost: int) -> List[CAT]:
     block_args = [bytes(a) for a in block_generator.generator_refs]
-    cost, block_result = block_generator.program.run_with_cost(max_cost, DESERIALIZE_MOD, block_args)
+    cost, block_result = block_generator.program.run_with_cost(max_cost, [DESERIALIZE_MOD, block_args])
 
     coin_spends = block_result.first()
 
@@ -134,7 +134,7 @@ def run_generator(block_generator: BlockGenerator, constants: ConsensusConstants
                 continue
 
             # If only 3 elements (opcode + 2 args), there is no memo, this is ph, amount
-            if type(condition[3]) != list:
+            if type(condition[3]) is not list:
                 # If it's not a list, it's not the correct format
                 conds[op].append(ConditionWithArgs(op, [i for i in condition[1:3]]))
                 continue

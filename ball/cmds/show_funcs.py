@@ -99,10 +99,9 @@ async def print_block_from_hash(
     from ball.types.blockchain_format.sized_bytes import bytes32
     from ball.types.full_block import FullBlock
     from ball.util.bech32m import encode_puzzle_hash
-    from ball.util.byte_types import hexstr_to_bytes
 
-    block: Optional[BlockRecord] = await node_client.get_block_record(hexstr_to_bytes(block_by_header_hash))
-    full_block: Optional[FullBlock] = await node_client.get_block(hexstr_to_bytes(block_by_header_hash))
+    block: Optional[BlockRecord] = await node_client.get_block_record(bytes32.from_hexstr(block_by_header_hash))
+    full_block: Optional[FullBlock] = await node_client.get_block(bytes32.from_hexstr(block_by_header_hash))
     # Would like to have a verbose flag for this
     if block is not None:
         assert full_block is not None
@@ -132,8 +131,6 @@ async def print_block_from_hash(
         address_prefix = config["network_overrides"]["config"][config["selected_network"]]["address_prefix"]
         farmer_address = encode_puzzle_hash(block.farmer_puzzle_hash, address_prefix)
         pool_address = encode_puzzle_hash(block.pool_puzzle_hash, address_prefix)
-        community_address = encode_puzzle_hash(block.community_puzzle_hash, address_prefix)
-        timelord_address = encode_puzzle_hash(block.timelord_puzzle_hash, address_prefix)
         pool_pk = (
             full_block.reward_chain_block.proof_of_space.pool_public_key
             if full_block.reward_chain_block.proof_of_space.pool_public_key is not None
@@ -155,8 +152,6 @@ async def print_block_from_hash(
             f"Plot Public Key        0x{full_block.reward_chain_block.proof_of_space.plot_public_key}\n"
             f"Pool Public Key        {pool_pk}\n"
             f"Tx Filter Hash         {tx_filter_hash}\n"
-            f"Community Address      {community_address}\n"
-            f"Timelord Address       {timelord_address}\n"
             f"Farmer Address         {farmer_address}\n"
             f"Pool Address           {pool_address}\n"
             f"Fees Amount            {fees}\n"
@@ -195,26 +190,24 @@ async def show_async(
     root_path: Path,
     print_fee_info_flag: bool,
     print_state: bool,
-    block_header_hash_by_height: str,
+    block_header_hash_by_height: Optional[int],
     block_by_header_hash: str,
 ) -> None:
     from ball.cmds.cmds_util import get_any_service_client
 
-    async with get_any_service_client(FullNodeRpcClient, rpc_port, root_path) as node_config_fp:
-        node_client, config, _ = node_config_fp
-        if node_client is not None:
-            # Check State
-            if print_state:
-                if await print_blockchain_state(node_client, config) is True:
-                    return None  # if no blockchain is found
-            if print_fee_info_flag:
-                await print_fee_info(node_client)
-            # Get Block Information
-            if block_header_hash_by_height != "":
-                block_header = await node_client.get_block_record_by_height(block_header_hash_by_height)
-                if block_header is not None:
-                    print(f"Header hash of block {block_header_hash_by_height}: {block_header.header_hash.hex()}")
-                else:
-                    print("Block height", block_header_hash_by_height, "not found")
-            if block_by_header_hash != "":
-                await print_block_from_hash(node_client, config, block_by_header_hash)
+    async with get_any_service_client(FullNodeRpcClient, rpc_port, root_path) as (node_client, config):
+        # Check State
+        if print_state:
+            if await print_blockchain_state(node_client, config) is True:
+                return None  # if no blockchain is found
+        if print_fee_info_flag:
+            await print_fee_info(node_client)
+        # Get Block Information
+        if block_header_hash_by_height is not None:
+            block_header = await node_client.get_block_record_by_height(block_header_hash_by_height)
+            if block_header is not None:
+                print(f"Header hash of block {block_header_hash_by_height}: {block_header.header_hash.hex()}")
+            else:
+                print("Block height", block_header_hash_by_height, "not found")
+        if block_by_header_hash != "":
+            await print_block_from_hash(node_client, config, block_by_header_hash)

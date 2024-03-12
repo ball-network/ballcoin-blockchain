@@ -9,15 +9,15 @@ from ball.types.generator_types import BlockGenerator, CompressorArg, GeneratorB
 from ball.util.ints import uint32
 from ball.wallet.puzzles.load_clvm import load_clvm_maybe_recompile
 
-DECOMPRESS_BLOCK = load_clvm_maybe_recompile("block_program_zero.clsp", package_or_requirement="ball.wallet.puzzles")
-DECOMPRESS_PUZZLE = load_clvm_maybe_recompile("decompress_puzzle.clsp", package_or_requirement="ball.wallet.puzzles")
+DECOMPRESS_BLOCK = load_clvm_maybe_recompile("block_program_zero.clsp", package_or_requirement="ball.full_node.puzzles")
+DECOMPRESS_PUZZLE = load_clvm_maybe_recompile("decompress_puzzle.clsp", package_or_requirement="ball.full_node.puzzles")
 # DECOMPRESS_CSE = load_clvm_maybe_recompile(
 #     "decompress_coin_spend_entry.clsp",
-#     package_or_requirement="ball.wallet.puzzles",
+#     package_or_requirement="ball.full_node.puzzles",
 # )
 
 DECOMPRESS_CSE_WITH_PREFIX = load_clvm_maybe_recompile(
-    "decompress_coin_spend_entry_with_prefix.clsp", package_or_requirement="ball.wallet.puzzles"
+    "decompress_coin_spend_entry_with_prefix.clsp", package_or_requirement="ball.full_node.puzzles"
 )
 log = logging.getLogger(__name__)
 

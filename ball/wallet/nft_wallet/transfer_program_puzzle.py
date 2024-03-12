@@ -11,7 +11,10 @@ from ball.wallet.puzzles.load_clvm import load_clvm_maybe_recompile
 from ball.wallet.puzzles.singleton_top_layer_v1_1 import SINGLETON_LAUNCHER_HASH, SINGLETON_MOD_HASH
 from ball.wallet.uncurried_puzzle import UncurriedPuzzle
 
-TRANSFER_PROGRAM_MOD = load_clvm_maybe_recompile("nft_ownership_transfer_program_one_way_claim_with_royalties.clsp")
+TRANSFER_PROGRAM_MOD = load_clvm_maybe_recompile(
+    "nft_ownership_transfer_program_one_way_claim_with_royalties.clsp",
+    package_or_requirement="ball.wallet.nft_wallet.puzzles",
+)
 
 
 def match_transfer_program_puzzle(puzzle: UncurriedPuzzle) -> Tuple[bool, List[Program]]:

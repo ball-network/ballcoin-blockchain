@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import logging
 import time
-from decimal import Decimal
 from typing import Optional
 
 from ball.protocols import timelord_protocol
 from ball.rpc.rpc_server import StateChangedProtocol
-from ball.timelord.timelord import Chain, IterationType, Timelord, iters_from_block
+from ball.timelord.iters_from_block import iters_from_block
+from ball.timelord.timelord import Timelord
+from ball.timelord.types import Chain, IterationType
 from ball.util.api_decorators import api_request
 from ball.util.ints import uint64
 
@@ -15,10 +16,15 @@ log = logging.getLogger(__name__)
 
 
 class TimelordAPI:
+    log: logging.Logger
     timelord: Timelord
 
     def __init__(self, timelord) -> None:
+        self.log = logging.getLogger(__name__)
         self.timelord = timelord
+
+    def ready(self) -> bool:
+        return True
 
     def _set_state_changed_callback(self, callback: StateChangedProtocol) -> None:
         self.timelord.state_changed_callback = callback
@@ -30,6 +36,21 @@ class TimelordAPI:
         async with self.timelord.lock:
             if self.timelord.bluebox_mode:
                 return None
+            self.timelord.max_allowed_inactivity_time = 60
+
+            # if there is a heavier unfinished block from a diff chain, skip
+            for unf_block in self.timelord.unfinished_blocks:
+                if unf_block.reward_chain_block.total_iters > new_peak.reward_chain_block.total_iters:
+                    found = False
+                    for rc, total_iters in new_peak.previous_reward_challenges:
+                        if rc == unf_block.rc_prev:
+                            found = True
+                            break
+
+                    if not found:
+                        log.info("there is a heavier unfinished block that does not belong to this chain- skip peak")
+                        return None
+
             if new_peak.reward_chain_block.weight > self.timelord.last_state.get_weight():
                 log.info("Not skipping peak, don't have. Maybe we are not the fastest timelord")
                 log.info(
@@ -60,9 +81,10 @@ class TimelordAPI:
                 sp_iters, ip_iters = iters_from_block(
                     self.timelord.constants,
                     new_unfinished_block.reward_chain_block,
+                    new_unfinished_block.proof_of_stake,
                     self.timelord.last_state.get_sub_slot_iters(),
                     self.timelord.last_state.get_difficulty(),
-                    Decimal(new_unfinished_block.difficulty_coefficient),  # staking
+                    self.timelord.get_height(),
                 )
             except Exception:
                 return None

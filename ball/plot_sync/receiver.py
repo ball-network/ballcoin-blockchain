@@ -5,10 +5,9 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Collection, Dict, List, Optional
 
-from blspy import G1Element
 from typing_extensions import Protocol
 
-from ball.consensus.coinbase import create_puzzlehash_for_pk
+from ball.consensus.pos_quality import UI_ACTUAL_SPACE_CONSTANT_FACTOR, _expected_plot_size
 from ball.plot_sync.delta import Delta, PathListDelta, PlotListDelta
 from ball.plot_sync.exceptions import (
     InvalidIdentifierError,
@@ -19,6 +18,7 @@ from ball.plot_sync.exceptions import (
     SyncIdsMatchError,
 )
 from ball.plot_sync.util import ErrorCodes, State, T_PlotSyncMessage
+from ball.plotting.util import HarvestingMode
 from ball.protocols.harvester_protocol import (
     Plot,
     PlotSyncDone,
@@ -80,12 +80,13 @@ class Receiver:
     _current_sync: Sync
     _last_sync: Sync
     _plots: Dict[str, Plot]
-    _staking_ph: Dict[str, int]
     _invalid: List[str]
     _keys_missing: List[str]
     _duplicates: List[str]
     _total_plot_size: int
+    _total_effective_plot_size: int
     _update_callback: ReceiverUpdateCallback
+    _harvesting_mode: Optional[HarvestingMode]
 
     def __init__(
         self,
@@ -96,12 +97,13 @@ class Receiver:
         self._current_sync = Sync()
         self._last_sync = Sync()
         self._plots = {}
-        self._staking_ph = {}
         self._invalid = []
         self._keys_missing = []
         self._duplicates = []
         self._total_plot_size = 0
+        self._total_effective_plot_size = 0
         self._update_callback = update_callback
+        self._harvesting_mode = None
 
     async def trigger_callback(self, update: Optional[Delta] = None) -> None:
         try:
@@ -114,11 +116,12 @@ class Receiver:
         self._current_sync = Sync()
         self._last_sync = Sync()
         self._plots.clear()
-        self._staking_ph.clear()
         self._invalid.clear()
         self._keys_missing.clear()
         self._duplicates.clear()
         self._total_plot_size = 0
+        self._total_effective_plot_size = 0
+        self._harvesting_mode = None
 
     def connection(self) -> WSBallConnection:
         return self._connection
@@ -146,6 +149,12 @@ class Receiver:
 
     def total_plot_size(self) -> int:
         return self._total_plot_size
+
+    def total_effective_plot_size(self) -> int:
+        return self._total_effective_plot_size
+
+    def harvesting_mode(self) -> Optional[HarvestingMode]:
+        return self._harvesting_mode
 
     async def _process(
         self, method: Callable[[T_PlotSyncMessage], Any], message_type: ProtocolMessageTypes, message: T_PlotSyncMessage
@@ -201,6 +210,7 @@ class Receiver:
         self._current_sync.delta.clear()
         self._current_sync.state = State.loaded
         self._current_sync.plots_total = data.plot_file_count
+        self._harvesting_mode = HarvestingMode(data.harvesting_mode)
         self._current_sync.bump_next_message_id()
 
     async def sync_started(self, data: PlotSyncStart) -> None:
@@ -208,22 +218,11 @@ class Receiver:
 
     async def _process_loaded(self, plot_infos: PlotSyncPlotList) -> None:
         self._validate_identifier(plot_infos.identifier)
-        puzzleHash: Dict[bytes, str] = {}
+
         for plot_info in plot_infos.data:
             if plot_info.filename in self._plots or plot_info.filename in self._current_sync.delta.valid.additions:
                 raise PlotAlreadyAvailableError(State.loaded, plot_info.filename)
             self._current_sync.delta.valid.additions[plot_info.filename] = plot_info
-
-            farmer_public_key = bytes(plot_info.farmer_public_key)
-            ph: Optional[str] = puzzleHash.get(farmer_public_key)
-            if ph is None:
-                ph = create_puzzlehash_for_pk(plot_info.farmer_public_key).hex()
-                puzzleHash[farmer_public_key] = ph
-            if ph not in self._staking_ph:
-                self._staking_ph[ph] = 1
-            else:
-                self._staking_ph[ph] += 1
-
             self._current_sync.bump_plots_processed()
 
         # Let the callback receiver know about the sync progress updates
@@ -345,6 +344,9 @@ class Receiver:
         self._keys_missing = self._current_sync.delta.keys_missing.additions.copy()
         self._duplicates = self._current_sync.delta.duplicates.additions.copy()
         self._total_plot_size = sum(plot.file_size for plot in self._plots.values())
+        self._total_effective_plot_size = int(
+            sum(UI_ACTUAL_SPACE_CONSTANT_FACTOR * int(_expected_plot_size(plot.size)) for plot in self._plots.values())
+        )
         # Save current sync as last sync and create a new current sync
         self._last_sync = self._current_sync
         self._current_sync = Sync()
@@ -373,7 +375,8 @@ class Receiver:
             "no_key_filenames": get_list_or_len(self._keys_missing, counts_only),
             "duplicates": get_list_or_len(self._duplicates, counts_only),
             "total_plot_size": self._total_plot_size,
+            "total_effective_plot_size": self._total_effective_plot_size,
             "syncing": syncing,
             "last_sync_time": self._last_sync.time_done,
-            "staking_ph": self._staking_ph,
+            "harvesting_mode": self._harvesting_mode,
         }

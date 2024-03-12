@@ -6,8 +6,10 @@ import random
 import sys
 from pathlib import Path
 from time import monotonic
+from typing import List
 
-from utils import (
+from benchmarks.utils import (
+    clvm_generator,
     rand_bytes,
     rand_class_group_element,
     rand_g1,
@@ -18,8 +20,6 @@ from utils import (
     rewards,
     setup_db,
 )
-
-from benchmarks.utils import clvm_generator
 from ball.consensus.block_record import BlockRecord
 from ball.full_node.block_store import BlockStore
 from ball.types.blockchain_format.foliage import Foliage, FoliageBlockData, FoliageTransactionBlock, TransactionsInfo
@@ -30,8 +30,10 @@ from ball.types.blockchain_format.serialized_program import SerializedProgram
 from ball.types.blockchain_format.sized_bytes import bytes32
 from ball.types.blockchain_format.sub_epoch_summary import SubEpochSummary
 from ball.types.full_block import FullBlock
-from ball.util.db_wrapper import DBWrapper2
 from ball.util.ints import uint8, uint32, uint64, uint128
+
+# to run this benchmark:
+# python -m benchmarks.coin_store
 
 NUM_ITERS = 20000
 
@@ -41,7 +43,6 @@ random.seed(123456789)
 
 async def run_add_block_benchmark(version: int) -> None:
     verbose: bool = "--verbose" in sys.argv
-    db_wrapper: DBWrapper2 = await setup_db("block-store-benchmark.db", version)
 
     # keep track of benchmark total time
     all_test_time = 0.0
@@ -51,7 +52,7 @@ async def run_add_block_benchmark(version: int) -> None:
 
     header_hashes = []
 
-    try:
+    async with setup_db("block-store-benchmark.db", version) as db_wrapper:
         block_store = await BlockStore.create(db_wrapper)
 
         block_height = 1
@@ -71,8 +72,12 @@ async def run_add_block_benchmark(version: int) -> None:
         if verbose:
             print("profiling add_full_block", end="")
 
+        tx_block_heights: List[uint32] = []
+
         for height in range(block_height, block_height + NUM_ITERS):
             is_transaction = transaction_block_counter == 0
+            if is_transaction:
+                tx_block_heights.append(uint32(height))
             fees = uint64(random.randint(0, 150000))
             farmer_coin, pool_coin = rewards(uint32(height))
             reward_claims_incorporated = [farmer_coin, pool_coin]
@@ -99,6 +104,7 @@ async def run_add_block_benchmark(version: int) -> None:
                 rand_g1() if has_pool_pk else None,
                 rand_hash() if not has_pool_pk else None,
                 rand_g1(),  # plot_public_key
+                rand_g1(), # farmer_public_key,
                 uint8(32),
                 rand_bytes(8 * 32),
             )
@@ -130,8 +136,8 @@ async def run_add_block_benchmark(version: int) -> None:
                 pool_target,
                 rand_g2() if has_pool_pk else None,  # pool_signature
                 rand_hash(),  # farmer_reward_puzzle_hash
-                rand_hash(),  # community_reward_puzzle_hash
-                rand_hash(),  # timelord_fee_puzzle_hash
+                rand_hash(),  # c_reward_puzzle_hash
+                rand_hash(),  # t_reward_puzzle_hash
                 bytes32([0] * 32),  # extension_data
             )
 
@@ -181,7 +187,7 @@ async def run_add_block_benchmark(version: int) -> None:
                 foliage,
                 foliage_transaction_block,
                 transactions_info,
-                None if is_transaction else SerializedProgram.from_bytes(clvm_generator),  # transactions_generator
+                SerializedProgram.from_bytes(clvm_generator) if is_transaction else None,  # transactions_generator
                 [],  # transactions_generator_ref_list
             )
 
@@ -201,6 +207,8 @@ async def run_add_block_benchmark(version: int) -> None:
                 sub_slot_iters,
                 rand_hash(),  # pool_puzzle_hash
                 rand_hash(),  # farmer_puzzle_hash
+                rand_hash(),  # c_puzzle_hash
+                rand_hash(),  # t_puzzle_hash
                 required_iters,
                 deficit,
                 deficit == 16,
@@ -253,6 +261,41 @@ async def run_add_block_benchmark(version: int) -> None:
         print(f"{total_time:0.4f}s, add_full_block")
         all_test_time += total_time
 
+        # === get_block_info() ===
+        total_time = 0.0
+        if verbose:
+            print("profiling get_block_info")
+
+        random.shuffle(header_hashes)
+        start = monotonic()
+        for h in header_hashes:
+            block_info = await block_store.get_block_info(h)
+            assert block_info is not None
+            assert len(block_info.prev_header_hash) == 32
+
+        stop = monotonic()
+        total_time += stop - start
+
+        print(f"{total_time:0.4f}s, get_block_info")
+        all_test_time += total_time
+
+        # === get_generator() ===
+        total_time = 0.0
+        if verbose:
+            print("profiling get_generator")
+
+        random.shuffle(header_hashes)
+        start = monotonic()
+        for h in header_hashes:
+            await block_store.get_generator(h)
+
+        stop = monotonic()
+        total_time += stop - start
+
+        print(f"{total_time:0.4f}s, get_generator")
+        all_test_time += total_time
+
+        # === get_full_block() ===
         total_time = 0.0
         if verbose:
             print("profiling get_full_block")
@@ -270,6 +313,7 @@ async def run_add_block_benchmark(version: int) -> None:
         print(f"{total_time:0.4f}s, get_full_block")
         all_test_time += total_time
 
+        # === get_full_block_bytes() ===
         total_time = 0.0
         if verbose:
             print("profiling get_full_block_bytes")
@@ -286,6 +330,23 @@ async def run_add_block_benchmark(version: int) -> None:
         print(f"{total_time:0.4f}s, get_full_block_bytes")
         all_test_time += total_time
 
+        # === get_generators_at() ===
+        total_time = 0.0
+        if verbose:
+            print("profiling get_generators_at")
+
+        start = monotonic()
+        for i in tx_block_heights:
+            gens = await block_store.get_generators_at([i])
+            assert len(gens) == 1
+
+        stop = monotonic()
+        total_time += stop - start
+
+        print(f"{total_time:0.4f}s, get_generators_at")
+        all_test_time += total_time
+
+        # === get_full_blocks_at() ===
         total_time = 0.0
         if verbose:
             print("profiling get_full_blocks_at")
@@ -302,6 +363,7 @@ async def run_add_block_benchmark(version: int) -> None:
         print(f"{total_time:0.4f}s, get_full_blocks_at")
         all_test_time += total_time
 
+        # === get_block_records_by_hash() ===
         total_time = 0.0
         if verbose:
             print("profiling get_block_records_by_hash")
@@ -318,6 +380,23 @@ async def run_add_block_benchmark(version: int) -> None:
         print(f"{total_time:0.4f}s, get_block_records_by_hash")
         all_test_time += total_time
 
+        # === get_block_bytes_by_hash() ===
+        total_time = 0.0
+        if verbose:
+            print("profiling get_block_bytes_by_hash")
+
+        start = monotonic()
+        for h in header_hashes:
+            blobs = await block_store.get_block_bytes_by_hash([h])
+            assert len(blobs) == 1
+
+        stop = monotonic()
+        total_time += stop - start
+
+        print(f"{total_time:0.4f}s, get_block_bytes_by_hash")
+        all_test_time += total_time
+
+        # === get_blocks_by_hash() ===
         total_time = 0.0
         if verbose:
             print("profiling get_blocks_by_hash")
@@ -334,6 +413,7 @@ async def run_add_block_benchmark(version: int) -> None:
         print(f"{total_time:0.4f}s, get_blocks_by_hash")
         all_test_time += total_time
 
+        # === get_block_record() ===
         total_time = 0.0
         if verbose:
             print("profiling get_block_record")
@@ -350,12 +430,13 @@ async def run_add_block_benchmark(version: int) -> None:
         print(f"{total_time:0.4f}s, get_block_record")
         all_test_time += total_time
 
+        # === get_block_records_in_range() ===
         total_time = 0.0
         if verbose:
             print("profiling get_block_records_in_range")
 
         start = monotonic()
-        for i in range(100):
+        for _ in range(100):
             hi = random.randint(1, block_height - 100)
             blocks_dict = await block_store.get_block_records_in_range(hi, hi + 99)
             assert len(blocks_dict) == 100
@@ -366,6 +447,7 @@ async def run_add_block_benchmark(version: int) -> None:
         print(f"{total_time:0.4f}s, get_block_records_in_range")
         all_test_time += total_time
 
+        # === get_block_records_close_to_peak() ===
         total_time = 0.0
         if verbose:
             print("profiling get_block_records_close_to_peak")
@@ -380,6 +462,7 @@ async def run_add_block_benchmark(version: int) -> None:
         print(f"{total_time:0.4f}s, get_block_records_close_to_peak")
         all_test_time += total_time
 
+        # === is_fully_compactified() ===
         total_time = 0.0
         if verbose:
             print("profiling is_fully_compactified")
@@ -392,15 +475,16 @@ async def run_add_block_benchmark(version: int) -> None:
         stop = monotonic()
         total_time += stop - start
 
-        print(f"{total_time:0.4f}s, get_block_record")
+        print(f"{total_time:0.4f}s, is_fully_compactified")
         all_test_time += total_time
 
+        # === get_random_not_compactified() ===
         total_time = 0.0
         if verbose:
             print("profiling get_random_not_compactified")
 
         start = monotonic()
-        for i in range(1, 5000):
+        for _ in range(1, 5000):
             blocks_int_list = await block_store.get_random_not_compactified(100)
             assert len(blocks_int_list) == 100
         stop = monotonic()
@@ -414,12 +498,7 @@ async def run_add_block_benchmark(version: int) -> None:
         db_size = os.path.getsize(Path("block-store-benchmark.db"))
         print(f"database size: {db_size/1000000:.3f} MB")
 
-    finally:
-        await db_wrapper.close()
-
 
 if __name__ == "__main__":
-    print("version 1")
-    asyncio.run(run_add_block_benchmark(1))
     print("version 2")
     asyncio.run(run_add_block_benchmark(2))

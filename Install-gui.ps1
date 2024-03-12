@@ -16,7 +16,7 @@ if ($null -eq (Get-Command node -ErrorAction SilentlyContinue))
 
 Write-Output "Running 'git submodule update --init --recursive'."
 Write-Output ""
-git submodule update --init --recursive
+# git submodule update --init --recursive
 if ( $SUBMODULE_BRANCH ) {
   git fetch --all
   git reset --hard $SUBMODULE_BRANCH
@@ -34,10 +34,10 @@ try {
     npm ci --loglevel=error
     npm audit fix
     npm run build
-    py ..\installhelper.py
+    # py ..\installhelper.py
 
     Write-Output ""
-    Write-Output "BallCoin Blockchain Install-gui.ps1 completed."
+    Write-Output "BallCoin blockchain Install-gui.ps1 completed."
     Write-Output ""
     Write-Output "Type 'cd ballcoin-blockchain-gui' and then 'npm run electron' to start the GUI."
 } finally {

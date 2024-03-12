@@ -65,7 +65,11 @@ class CostLogger:
     def add_cost(self, descriptor: str, spend_bundle: SpendBundle) -> SpendBundle:
         program: BlockGenerator = simple_solution_generator(spend_bundle)
         npc_result: NPCResult = get_name_puzzle_conditions(
-            program, INFINITE_COST, mempool_mode=True, height=DEFAULT_CONSTANTS.SOFT_FORK2_HEIGHT
+            program,
+            INFINITE_COST,
+            mempool_mode=True,
+            height=DEFAULT_CONSTANTS.HARD_FORK_HEIGHT,
+            constants=DEFAULT_CONSTANTS,
         )
         self.cost_dict[descriptor] = npc_result.cost
         cost_to_subtract: int = 0
@@ -105,14 +109,15 @@ class SimBlockRecord(Streamable):
 
     @classmethod
     def create(cls: Type[_T_SimBlockRecord], rci: List[Coin], height: uint32, timestamp: uint64) -> _T_SimBlockRecord:
+        prev_transaction_block_height = uint32(height - 1 if height > 0 else 0)
         return cls(
             rci,
             height,
-            uint32(height - 1 if height > 0 else 0),
+            prev_transaction_block_height,
             timestamp,
             True,
-            std_hash(bytes(height)),
-            std_hash(std_hash(height)),
+            std_hash(height.stream_to_bytes()),
+            std_hash(prev_transaction_block_height.stream_to_bytes()),
         )
 
 
@@ -148,10 +153,10 @@ class SpendSim:
         else:
             uri = f"file:{db_path}"
 
-        self.db_wrapper = await DBWrapper2.create(database=uri, uri=True, reader_count=1)
+        self.db_wrapper = await DBWrapper2.create(database=uri, uri=True, reader_count=1, db_version=2)
 
         self.coin_store = await CoinStore.create(self.db_wrapper)
-        self.mempool_manager = MempoolManager(self.coin_store.get_coin_record, defaults)
+        self.mempool_manager = MempoolManager(self.coin_store.get_coin_records, defaults)
         self.defaults = defaults
 
         # Load the next data if there is any
@@ -185,8 +190,8 @@ class SpendSim:
             await c.close()
         await self.db_wrapper.close()
 
-    async def new_peak(self) -> None:
-        await self.mempool_manager.new_peak(self.block_records[-1], None)
+    async def new_peak(self, spent_coins_ids: Optional[List[bytes32]]) -> None:
+        await self.mempool_manager.new_peak(self.block_records[-1], spent_coins_ids)
 
     def new_coin_record(self, coin: Coin, coinbase: bool = False) -> CoinRecord:
         return CoinRecord(
@@ -201,13 +206,13 @@ class SpendSim:
         coins = set()
         async with self.db_wrapper.reader_no_transaction() as conn:
             cursor = await conn.execute(
-                "SELECT * from coin_record WHERE coinbase=0 AND spent=0 ",
+                "SELECT puzzle_hash,coin_parent,amount from coin_record WHERE coinbase=0 AND spent_index==0 ",
             )
             rows = await cursor.fetchall()
 
             await cursor.close()
         for row in rows:
-            coin = Coin(bytes32(bytes.fromhex(row[6])), bytes32(bytes.fromhex(row[5])), uint64.from_bytes(row[7]))
+            coin = Coin(bytes32(row[1]), bytes32(row[0]), uint64.from_bytes(row[2]))
             coins.add(coin)
         return list(coins)
 
@@ -223,31 +228,35 @@ class SpendSim:
     ) -> Tuple[List[Coin], List[Coin]]:
         # Fees get calculated
         fees = uint64(0)
-        for item in self.mempool_manager.mempool.all_spends():
+        for item in self.mempool_manager.mempool.all_items():
             fees = uint64(fees + item.fee)
 
         # Rewards get created
         next_block_height: uint32 = uint32(self.block_height + 1) if len(self.block_records) > 0 else self.block_height
-        pool_coin: Coin = create_pool_coin(
-            next_block_height,
-            puzzle_hash,
-            calculate_pool_reward(next_block_height),
-            self.defaults.GENESIS_CHALLENGE,
-        )
-        farmer_coin: Coin = create_farmer_coin(
+        reward_coins = []
+        pool_reward = calculate_pool_reward(next_block_height)
+        if pool_reward > 0:
+            reward_coins.append(create_pool_coin(
+                next_block_height,
+                puzzle_hash,
+                calculate_pool_reward(next_block_height),
+                self.defaults.GENESIS_CHALLENGE,
+            ))
+        reward_coins.append(create_farmer_coin(
             next_block_height,
             puzzle_hash,
             uint64(calculate_base_farmer_reward(next_block_height) + fees),
             self.defaults.GENESIS_CHALLENGE,
-        )
+        ))
         await self.coin_store._add_coin_records(
-            [self.new_coin_record(pool_coin, True), self.new_coin_record(farmer_coin, True)]
+            [self.new_coin_record(coin, True) for coin in reward_coins]
         )
 
         # Coin store gets updated
         generator_bundle: Optional[SpendBundle] = None
         return_additions: List[Coin] = []
         return_removals: List[Coin] = []
+        spent_coins_ids = None
         if (len(self.block_records) > 0) and (self.mempool_manager.mempool.size() > 0):
             peak = self.mempool_manager.peak
             if peak is not None:
@@ -258,15 +267,16 @@ class SpendSim:
                     generator_bundle = bundle
                     return_additions = additions
                     return_removals = bundle.removals()
+                    spent_coins_ids = [r.name() for r in return_removals]
 
                     await self.coin_store._add_coin_records([self.new_coin_record(addition) for addition in additions])
-                    await self.coin_store._set_spent([r.name() for r in return_removals], uint32(self.block_height + 1))
+                    await self.coin_store._set_spent(spent_coins_ids, uint32(self.block_height + 1))
 
         # SimBlockRecord is created
         generator: Optional[BlockGenerator] = await self.generate_transaction_generator(generator_bundle)
         self.block_records.append(
             SimBlockRecord.create(
-                [pool_coin, farmer_coin],
+                reward_coins,
                 next_block_height,
                 self.timestamp,
             )
@@ -277,7 +287,7 @@ class SpendSim:
         self.block_height = next_block_height
 
         # mempool is reset
-        await self.new_peak()
+        await self.new_peak(spent_coins_ids)
 
         # return some debugging data
         return return_additions, return_removals
@@ -412,26 +422,21 @@ class SimClient:
         removals: List[CoinRecord] = await self.service.coin_store.get_coins_removed_at_height(block_height)
         return additions, removals
 
-    async def get_puzzle_and_solution(self, coin_id: bytes32, height: uint32) -> Optional[CoinSpend]:
+    async def get_puzzle_and_solution(self, coin_id: bytes32, height: uint32) -> CoinSpend:
         filtered_generators = list(filter(lambda block: block.height == height, self.service.blocks))
         # real consideration should be made for the None cases instead of just hint ignoring
         generator: BlockGenerator = filtered_generators[0].transactions_generator  # type: ignore[assignment]
         coin_record = await self.service.coin_store.get_coin_record(coin_id)
         assert coin_record is not None
-        error, puzzle, solution = get_puzzle_and_solution_for_coin(generator, coin_record.coin)
-        if error:
-            return None
-        else:
-            assert puzzle is not None
-            assert solution is not None
-            return CoinSpend(coin_record.coin, puzzle, solution)
+        spend_info = get_puzzle_and_solution_for_coin(generator, coin_record.coin, height, self.service.defaults)
+        return CoinSpend(coin_record.coin, spend_info.puzzle, spend_info.solution)
 
     async def get_all_mempool_tx_ids(self) -> List[bytes32]:
-        return self.service.mempool_manager.mempool.all_spend_ids()
+        return self.service.mempool_manager.mempool.all_item_ids()
 
     async def get_all_mempool_items(self) -> Dict[bytes32, MempoolItem]:
         spends = {}
-        for item in self.service.mempool_manager.mempool.all_spends():
+        for item in self.service.mempool_manager.mempool.all_items():
             spends[item.name] = item
         return spends
 

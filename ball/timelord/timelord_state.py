@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from decimal import Decimal
 from typing import List, Optional, Tuple, Union
 
 from ball.consensus.constants import ConsensusConstants
@@ -50,7 +49,7 @@ class LastState:
         self.passed_ses_height_but_not_yet_included = False
         self.infused_ses = False
 
-    def set_state(self, state: Union[timelord_protocol.NewPeakTimelord, EndOfSubSlotBundle]):
+    def set_state(self, state: Union[timelord_protocol.NewPeakTimelord, EndOfSubSlotBundle]) -> None:
         if isinstance(state, timelord_protocol.NewPeakTimelord):
             self.state_type = StateType.PEAK
             self.peak = state
@@ -58,9 +57,10 @@ class LastState:
             _, self.last_ip = iters_from_block(
                 self.constants,
                 state.reward_chain_block,
+                state.proof_of_stake,
                 state.sub_slot_iters,
                 state.difficulty,
-                Decimal(state.difficulty_coefficient),
+                state.reward_chain_block.height,
             )
             self.deficit = state.deficit
             self.sub_epoch_summary = state.sub_epoch_summary

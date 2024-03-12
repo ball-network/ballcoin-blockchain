@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from blspy import G2Element
+from chia_rs import G2Element
 from clvm_tools import binutils
 
 from ball.consensus.block_rewards import calculate_base_farmer_reward, calculate_pool_reward
@@ -28,7 +28,7 @@ def print_conditions(spend_bundle: SpendBundle):
 
 
 async def main() -> None:
-    rpc_port: uint16 = uint16(38885)
+    rpc_port: uint16 = uint16(23334)
     self_hostname = "localhost"
     path = DEFAULT_ROOT_PATH
     config = load_config(path, "config.yaml")
@@ -40,8 +40,8 @@ async def main() -> None:
         farmer_prefarm = block_record.reward_claims_incorporated[1]
         pool_prefarm = block_record.reward_claims_incorporated[0]
 
-        pool_amounts = int(calculate_pool_reward(uint32(0)) / 2)
-        farmer_amounts = int(calculate_base_farmer_reward(uint32(0)) / 2)
+        pool_amounts = int(calculate_pool_reward(uint32(0), uint32(0)) / 2)
+        farmer_amounts = int(calculate_base_farmer_reward(uint32(0), uint32(0)) / 2)
         print(farmer_prefarm.amount, farmer_amounts)
         assert farmer_amounts == farmer_prefarm.amount // 2
         assert pool_amounts == pool_prefarm.amount // 2

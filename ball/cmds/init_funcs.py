@@ -138,19 +138,6 @@ def check_keys(new_root: Path, keychain: Optional[Keychain] = None) -> None:
                 f" keys for. We searched the first {number_of_ph_to_search} addresses. Consider overriding "
                 f"{config['pool']['ball_target_address']} with {all_targets[0]}"
             )
-        if "ball_target_address" not in config["timelord"]:
-            print(
-                f"Setting the ball destination for the timelord fee (1/200 plus fees)"
-                f" to {all_targets[0]}"
-            )
-            config["timelord"]["ball_target_address"] = all_targets[0]
-            updated_target = True
-        elif config["timelord"]["ball_target_address"] not in all_targets:
-            print(
-                f"WARNING: using a farmer address which we might not have the private"
-                f" keys for. We searched the first {number_of_ph_to_search} addresses. Consider overriding "
-                f"{config['timelord']['ball_target_address']} with {all_targets[0]}"
-            )
         if updated_target:
             print(
                 f"To change the BALL destination addresses, edit the `ball_target_address` entries in"
@@ -158,7 +145,7 @@ def check_keys(new_root: Path, keychain: Optional[Keychain] = None) -> None:
             )
 
         # Set the pool pks in the farmer
-        pool_pubkeys_hex = set(bytes(pk).hex() for pk in pool_child_pubkeys)
+        pool_pubkeys_hex = {bytes(pk).hex() for pk in pool_child_pubkeys}
         if "pool_public_keys" in config["farmer"]:
             for pk_hex in config["farmer"]["pool_public_keys"]:
                 # Add original ones in config
@@ -344,7 +331,7 @@ def ball_init(
     if ball_root is not None:
         print(f"BALL_ROOT is set to {ball_root}")
 
-    print(f"Ball directory {root_path}")
+    print(f"BallCoin directory {root_path}")
     if root_path.is_dir() and Path(root_path / "config" / "config.yaml").exists():
         # This is reached if BALL_ROOT is set, or if user has run ball init twice
         # before a new update.
@@ -418,6 +405,8 @@ def ball_init(
     else:
         config = load_config(root_path, "config.yaml")["full_node"]
         db_path_replaced = config["database_path"].replace("CHALLENGE", config["selected_network"])
+        if "v2_r1" not in db_path_replaced:
+            db_path_replaced = db_path_replaced.replace("v2", "v2_r1")
         db_path = path_from_root(root_path, db_path_replaced)
         db_path.parent.mkdir(parents=True, exist_ok=True)
         try:

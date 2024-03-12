@@ -8,6 +8,7 @@ from ball.types.blockchain_format.reward_chain_block import RewardChainBlock
 from ball.types.blockchain_format.sized_bytes import bytes32
 from ball.types.blockchain_format.vdf import VDFInfo, VDFProof
 from ball.types.end_of_slot_bundle import EndOfSubSlotBundle
+from ball.types.stake_record import ProofOfStake
 from ball.types.header_block import HeaderBlock
 from ball.util.ints import uint8, uint32, uint64, uint128
 from ball.util.streamable import Streamable, streamable
@@ -38,6 +39,7 @@ class SubEpochData(Streamable):
 class SubSlotData(Streamable):
     # if infused
     proof_of_space: Optional[ProofOfSpace]
+    proof_of_stake: Optional[ProofOfStake]
     # VDF to signage point
     cc_signage_point: Optional[VDFProof]
     # VDF from signage to infusion point
@@ -102,4 +104,3 @@ class WeightProof(Streamable):
     sub_epochs: List[SubEpochData]
     sub_epoch_segments: List[SubEpochChallengeSegment]  # sampled sub epoch
     recent_chain_data: List[HeaderBlock]
-    difficulty_coefficients: List[str]

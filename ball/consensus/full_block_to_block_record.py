@@ -4,6 +4,7 @@ from typing import List, Optional, Union
 
 from ball.consensus.block_record import BlockRecord
 from ball.consensus.blockchain_interface import BlockchainInterface
+from ball.consensus.coinbase import create_puzzlehash_for_pk
 from ball.consensus.constants import ConsensusConstants
 from ball.consensus.deficit import calculate_deficit
 from ball.consensus.difficulty_adjustment import get_next_sub_slot_iters_and_difficulty
@@ -170,5 +171,5 @@ def header_block_to_sub_block_record(
         finished_infused_challenge_slot_hashes,
         finished_reward_slot_hashes,
         ses,
-        block.reward_chain_block.proof_of_space.farmer_public_key,
+        create_puzzlehash_for_pk(block.reward_chain_block.proof_of_space.farmer_public_key),
     )

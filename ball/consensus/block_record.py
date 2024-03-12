@@ -3,9 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Optional
 
-from blspy import G1Element
+from chia_rs import G1Element
 from typing_extensions import Protocol
 
+from ball.consensus.coinbase import create_puzzlehash_for_pk
 from ball.consensus.constants import ConsensusConstants
 from ball.consensus.pot_iterations import calculate_ip_iters, calculate_sp_iters
 from ball.types.blockchain_format.classgroup import ClassgroupElement
@@ -66,8 +67,8 @@ class BlockRecord(Streamable):
     sub_slot_iters: uint64  # Current network sub_slot_iters parameter
     pool_puzzle_hash: bytes32  # Need to keep track of these because Coins are created in a future block
     farmer_puzzle_hash: bytes32
-    community_puzzle_hash: bytes32
-    timelord_puzzle_hash: bytes32
+    community_puzzle_hash: Optional[bytes32]
+    timelord_puzzle_hash: Optional[bytes32]
     required_iters: uint64  # The number of iters required for this proof of space
     deficit: uint8  # A deficit of 16 is an overflow block after an infusion. Deficit of 15 is a challenge block
     overflow: bool
@@ -88,7 +89,7 @@ class BlockRecord(Streamable):
     sub_epoch_summary_included: Optional[SubEpochSummary]
 
     # staking the mining farmer's public key puzzle hash
-    farmer_public_key: G1Element
+    farm_puzzle_hash: bytes32
 
     @property
     def is_transaction_block(self) -> bool:

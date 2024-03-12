@@ -91,7 +91,6 @@ class RespondBlocks(Streamable):
     start_height: uint32
     end_height: uint32
     blocks: List[FullBlock]
-    difficulty_coefficients: List[str]
 
 
 @streamable
@@ -105,7 +104,6 @@ class RejectBlocks(Streamable):
 @dataclass(frozen=True)
 class RespondBlock(Streamable):
     block: FullBlock
-    difficulty_coefficient: str
 
 
 @streamable
@@ -133,7 +131,6 @@ class NewSignagePointOrEndOfSubSlot(Streamable):
     challenge_hash: bytes32
     index_from_challenge: uint8
     last_rc_infusion: bytes32
-    timelord_fee_puzzle_hash: bytes32
 
 
 @streamable
@@ -152,7 +149,6 @@ class RespondSignagePoint(Streamable):
     challenge_chain_proof: VDFProof
     reward_chain_vdf: VDFInfo
     reward_chain_proof: VDFProof
-    timelord_fee_puzzle_hash: bytes32
 
 
 @streamable

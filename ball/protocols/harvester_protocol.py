@@ -3,10 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
-from blspy import G1Element, G2Element
+from chia_rs import G1Element, G2Element
 
 from ball.types.blockchain_format.proof_of_space import ProofOfSpace
 from ball.types.blockchain_format.sized_bytes import bytes32
+from ball.types.stake_record import ProofOfStake
 from ball.util.ints import int16, uint8, uint32, uint64
 from ball.util.streamable import Streamable, streamable
 
@@ -39,9 +40,10 @@ class NewSignagePointHarvester(Streamable):
     sub_slot_iters: uint64
     signage_point_index: uint8
     sp_hash: bytes32
-    timelord_fee_puzzle_hash: bytes32
     pool_difficulties: List[PoolDifficulty]
-    stakings: List[Tuple[G1Element, str]]  # staking difficulty_coefficient of each farmer public key's puzzle hash
+    filter_prefix_bits: uint8
+    stake_height: uint32
+    stake_coefficients: List[Tuple[G1Element, uint64]]
 
 
 @streamable
@@ -51,8 +53,8 @@ class NewProofOfSpace(Streamable):
     sp_hash: bytes32
     plot_identifier: str
     proof: ProofOfSpace
+    proof_of_stake: ProofOfStake
     signage_point_index: uint8
-    difficulty_coefficient: str  # staking
 
 
 @streamable
@@ -73,7 +75,6 @@ class RespondSignatures(Streamable):
     local_pk: G1Element
     farmer_pk: G1Element
     message_signatures: List[Tuple[bytes32, G2Element]]
-    difficulty_coefficient: str
 
 
 @streamable
@@ -87,7 +88,7 @@ class Plot(Streamable):
     plot_public_key: G1Element
     file_size: uint64
     time_modified: uint64
-    farmer_public_key: G1Element  # staking
+    compression_level: Optional[uint8]
 
 
 @streamable
@@ -119,11 +120,13 @@ class PlotSyncStart(Streamable):
     initial: bool
     last_sync_id: uint64
     plot_file_count: uint32
+    harvesting_mode: uint8
 
     def __str__(self) -> str:
         return (
             f"PlotSyncStart: identifier {self.identifier}, initial {self.initial}, "
-            f"last_sync_id {self.last_sync_id}, plot_file_count {self.plot_file_count}"
+            f"last_sync_id {self.last_sync_id}, plot_file_count {self.plot_file_count}, "
+            f"harvesting_mode {self.harvesting_mode}"
         )
 
 

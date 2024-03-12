@@ -5,14 +5,14 @@ from typing import Optional
 import click
 
 
-@click.command("netspace", short_help="Estimate total farmed space on the network")
+@click.command("netspace", help="Estimate total farmed space on the network")
 @click.option(
     "-p",
     "--rpc-port",
     help=(
         "Set the port where the Full Node is hosting the RPC interface. "
         "See the rpc_port under full_node in config.yaml. "
-        "[default: 38885]"
+        "[default: 23334]"
     ),
     type=int,
     default=None,

@@ -17,11 +17,11 @@ address2 = "tball1c2cguswhvmdyz9hr3q6hak2h6p9dw4rz82g4707k2xy2sarv705qcce4pn"  #
 ph1 = decode_puzzle_hash(address1)
 ph2 = decode_puzzle_hash(address2)
 
-pool_amounts = int(calculate_pool_reward(uint32(0)) / 2)
-farmer_amounts = int(calculate_base_farmer_reward(uint32(0)) / 2)
+pool_amounts = int(calculate_pool_reward(uint32(0), uint32(0)) / 2)
+farmer_amounts = int(calculate_base_farmer_reward(uint32(0), uint32(0)) / 2)
 
-assert pool_amounts * 2 == calculate_pool_reward(uint32(0))
-assert farmer_amounts * 2 == calculate_base_farmer_reward(uint32(0))
+assert pool_amounts * 2 == calculate_pool_reward(uint32(0), uint32(0))
+assert farmer_amounts * 2 == calculate_base_farmer_reward(uint32(0), uint32(0))
 
 
 def make_puzzle(amount: int) -> int:
@@ -57,4 +57,4 @@ total_ball += make_puzzle(pool_amounts)
 print("\nFarmer address: ")
 total_ball += make_puzzle(farmer_amounts)
 
-assert total_ball == calculate_base_farmer_reward(uint32(0)) + calculate_pool_reward(uint32(0))
+assert total_ball == calculate_base_farmer_reward(uint32(0), uint32(0)) + calculate_pool_reward(uint32(0), uint32(0))

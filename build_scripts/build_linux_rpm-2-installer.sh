@@ -21,12 +21,11 @@ if [ ! "$BALL_INSTALLER_VERSION" ]; then
 	echo "WARNING: No environment variable BALL_INSTALLER_VERSION set. Using 0.0.0."
 	BALL_INSTALLER_VERSION="0.0.0"
 fi
-echo "Ball Installer Version is: $BALL_INSTALLER_VERSION"
+echo "BallCoin Installer Version is: $BALL_INSTALLER_VERSION"
 
 echo "Installing npm and electron packagers"
 cd npm_linux || exit 1
 npm ci
-PATH=$(npm bin):$PATH
 cd .. || exit 1
 
 echo "Create dist/"
@@ -34,7 +33,7 @@ rm -rf dist
 mkdir dist
 
 echo "Create executables with pyinstaller"
-SPEC_FILE=$(python -c 'import ball; print(ball.PYINSTALLER_SPEC_PATH)')
+SPEC_FILE=$(python -c 'import sys; from pathlib import Path; path = Path(sys.argv[1]); print(path.absolute().as_posix())' "pyinstaller.spec")
 pyinstaller --log-level=INFO "$SPEC_FILE"
 LAST_EXIT_CODE=$?
 if [ "$LAST_EXIT_CODE" -ne 0 ]; then
@@ -42,11 +41,19 @@ if [ "$LAST_EXIT_CODE" -ne 0 ]; then
 	exit $LAST_EXIT_CODE
 fi
 
+# Creates a directory of licenses
+echo "Building pip and NPM license directory"
+pwd
+bash ./build_license_directory.sh
+
 # Builds CLI only rpm
 CLI_RPM_BASE="ballcoin-blockchain-cli-$BALL_INSTALLER_VERSION-1.$REDHAT_PLATFORM"
 mkdir -p "dist/$CLI_RPM_BASE/opt/ball"
 mkdir -p "dist/$CLI_RPM_BASE/usr/bin"
+mkdir -p "dist/$CLI_RPM_BASE/etc/systemd/system"
 cp -r dist/daemon/* "dist/$CLI_RPM_BASE/opt/ball/"
+cp assets/systemd/*.service "dist/$CLI_RPM_BASE/etc/systemd/system/"
+
 ln -s ../../opt/ball/ball "dist/$CLI_RPM_BASE/usr/bin/ball"
 # This is built into the base build image
 # shellcheck disable=SC1091
@@ -57,18 +64,21 @@ rvm use ruby-3
 # Marking as a dependency allows yum/dnf to automatically install the libxcrypt-compat package as well
 fpm -s dir -t rpm \
   -C "dist/$CLI_RPM_BASE" \
+  --directories "/opt/ball" \
   -p "dist/$CLI_RPM_BASE.rpm" \
   --name ballcoin-blockchain-cli \
   --license Apache-2.0 \
   --version "$BALL_INSTALLER_VERSION" \
   --architecture "$REDHAT_PLATFORM" \
-  --description "Ball is a modern cryptocurrency built from scratch, designed to be efficient, decentralized, and secure." \
-  --depends /usr/lib64/libcrypt.so.1 \
+  --description "BallCoin is a modern cryptocurrency built from scratch, designed to be efficient, decentralized, and secure." \
+  --rpm-tag 'Recommends: libxcrypt-compat' \
+  --rpm-tag '%define _build_id_links none' \
+  --rpm-tag '%undefine _missing_build_ids_terminate_build' \
+  --before-install=assets/rpm/before-install.sh \
+  --rpm-tag 'Requires(pre): findutils' \
   .
 # CLI only rpm done
-
 cp -r dist/daemon ../ballcoin-blockchain-gui/packages/gui
-
 # Change to the gui package
 cd ../ballcoin-blockchain-gui/packages/gui || exit 1
 
@@ -82,11 +92,11 @@ if [ "$REDHAT_PLATFORM" = "arm64" ]; then
   OPT_ARCH="--arm64"
 fi
 PRODUCT_NAME="ball"
-echo electron-builder build --linux rpm "${OPT_ARCH}" \
+echo npx electron-builder build --linux rpm "${OPT_ARCH}" \
   --config.extraMetadata.name=ballcoin-blockchain \
   --config.productName="${PRODUCT_NAME}" --config.linux.desktop.Name="BallCoin Blockchain" \
   --config.rpm.packageName="ballcoin-blockchain"
-electron-builder build --linux rpm "${OPT_ARCH}" \
+npx electron-builder build --linux rpm "${OPT_ARCH}" \
   --config.extraMetadata.name=ballcoin-blockchain \
   --config.productName="${PRODUCT_NAME}" --config.linux.desktop.Name="BallCoin Blockchain" \
   --config.rpm.packageName="ballcoin-blockchain"

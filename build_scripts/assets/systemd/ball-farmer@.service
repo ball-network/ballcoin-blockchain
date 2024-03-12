@@ -1,0 +1,16 @@
+[Unit]
+Description=Ball Farmer Service for %i
+Requires=ball-daemon@%i.service
+After=ball-daemon@%i.service
+
+[Service]
+Type=simple
+Environment=BALL_ROOT=/home/%i/.ball/mainnet
+ExecStart=/opt/ball/ball_farmer
+User=%i
+Group=%i
+LimitNOFILE=1048576
+LimitNPROC=1048576
+
+[Install]
+WantedBy=multi-user.target

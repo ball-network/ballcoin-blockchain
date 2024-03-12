@@ -3,12 +3,13 @@ from __future__ import annotations
 import asyncio
 import itertools
 import time
-from typing import Any, Collection, Dict, Iterator, List, Optional, Set, Tuple, Union
+from typing import Any, Collection, Dict, List, Optional, Set, Tuple, Union
 
 import anyio
 
 from ball.consensus.block_record import BlockRecord
 from ball.consensus.block_rewards import calculate_base_farmer_reward, calculate_pool_reward
+from ball.consensus.blockchain import BlockchainMutexPriority
 from ball.consensus.multiprocess_validation import PreValidationResult
 from ball.full_node.full_node import FullNode
 from ball.full_node.full_node_api import FullNodeAPI
@@ -16,7 +17,6 @@ from ball.rpc.rpc_server import default_get_connections
 from ball.server.outbound_message import NodeType
 from ball.simulator.block_tools import BlockTools
 from ball.simulator.simulator_protocol import FarmNewBlockProtocol, GetAllCoinsProtocol, ReorgProtocol
-from ball.simulator.time_out_assert import adjusted_timeout
 from ball.types.blockchain_format.coin import Coin
 from ball.types.blockchain_format.sized_bytes import bytes32
 from ball.types.coin_record import CoinRecord
@@ -24,8 +24,10 @@ from ball.types.full_block import FullBlock
 from ball.types.spend_bundle import SpendBundle
 from ball.util.config import lock_and_load_config, save_config
 from ball.util.ints import uint8, uint32, uint64, uint128
+from ball.util.timing import adjusted_timeout, backoff_times
+from ball.wallet.payment import Payment
 from ball.wallet.transaction_record import TransactionRecord
-from ball.wallet.util.wallet_types import AmountWithPuzzlehash
+from ball.wallet.util.tx_config import DEFAULT_TX_CONFIG
 from ball.wallet.wallet import Wallet
 from ball.wallet.wallet_node import WalletNode
 from ball.wallet.wallet_state_manager import WalletStateManager
@@ -38,24 +40,6 @@ class _Default:
 default = _Default()
 
 timeout_per_block = 5
-
-
-def backoff_times(
-    initial: float = 0.001,
-    final: float = 0.100,
-    time_to_final: float = 0.5,
-    clock=time.monotonic,
-) -> Iterator[float]:
-    # initially implemented as a simple linear backoff
-
-    start = clock()
-    delta = 0
-
-    result_range = final - initial
-
-    while True:
-        yield min(final, initial + ((delta / time_to_final) * result_range))
-        delta = clock() - start
 
 
 async def wait_for_coins_in_wallet(coins: Set[Coin], wallet: Wallet, timeout: Optional[float] = 5):
@@ -144,7 +128,7 @@ class FullNodeSimulator(FullNodeAPI):
         While reorgs are preferred, this is also an option
         Note: This does not broadcast the changes, and all wallets will need to be wiped.
         """
-        async with self.full_node._blockchain_lock_high_priority:
+        async with self.full_node.blockchain.priority_mutex.acquire(priority=BlockchainMutexPriority.high):
             peak_height: Optional[uint32] = self.full_node.blockchain.get_peak_height()
             if peak_height is None:
                 raise ValueError("We can't revert without any blocks.")
@@ -157,6 +141,7 @@ class FullNodeSimulator(FullNodeAPI):
             async with self.full_node.block_store.db_wrapper.writer():
                 # set coinstore
                 await self.full_node.coin_store.rollback_to_block(new_height)
+                await self.full_node.stake_record_store.rollback_to_block(new_height)
                 # set blockstore to new height
                 await self.full_node.block_store.rollback(new_height)
                 await self.full_node.block_store.set_peak(block_record.header_hash)
@@ -179,7 +164,7 @@ class FullNodeSimulator(FullNodeAPI):
     async def farm_new_transaction_block(
         self, request: FarmNewBlockProtocol, force_wait_for_timestamp: bool = False
     ) -> FullBlock:
-        async with self.full_node._blockchain_lock_high_priority:
+        async with self.full_node.blockchain.priority_mutex.acquire(priority=BlockchainMutexPriority.high):
             self.log.info("Farming new block!")
             current_blocks = await self.get_all_full_blocks()
             if len(current_blocks) == 0:
@@ -228,7 +213,7 @@ class FullNodeSimulator(FullNodeAPI):
         return more[-1]
 
     async def farm_new_block(self, request: FarmNewBlockProtocol, force_wait_for_timestamp: bool = False):
-        async with self.full_node._blockchain_lock_high_priority:
+        async with self.full_node.blockchain.priority_mutex.acquire(priority=BlockchainMutexPriority.high):
             self.log.info("Farming new block!")
             current_blocks = await self.get_all_full_blocks()
             if len(current_blocks) == 0:
@@ -477,6 +462,34 @@ class FullNodeSimulator(FullNodeAPI):
 
                 await asyncio.sleep(backoff)
 
+    async def wait_transaction_records_marked_as_in_mempool(
+        self,
+        record_ids: Collection[bytes32],
+        wallet_node: WalletNode,
+        timeout: Union[None, float] = 10,
+    ) -> None:
+        """Wait until the transaction records have been marked that they have made it into the mempool.  Transaction
+        records with no spend bundle are ignored.
+
+        Arguments:
+            records: The transaction records to wait for.
+        """
+        with anyio.fail_after(delay=adjusted_timeout(timeout)):
+            ids_to_check: Set[bytes32] = set(record_ids)
+
+            for backoff in backoff_times():
+                found = set()
+                for txid in ids_to_check:
+                    tx = await wallet_node.wallet_state_manager.tx_store.get_transaction_record(txid)
+                    if tx is not None and (tx.is_in_mempool() or tx.spend_bundle is None):
+                        found.add(txid)
+                ids_to_check = ids_to_check.difference(found)
+
+                if len(ids_to_check) == 0:
+                    return
+
+                await asyncio.sleep(backoff)
+
     async def process_transaction_records(
         self,
         records: Collection[TransactionRecord],
@@ -568,6 +581,24 @@ class FullNodeSimulator(FullNodeAPI):
                 # at least one wallet has unconfirmed transactions
                 await asyncio.sleep(backoff)
 
+    async def check_transactions_confirmed(
+        self,
+        wallet_state_manager: WalletStateManager,
+        transactions: List[TransactionRecord],
+        timeout: Optional[float] = 5,
+    ) -> None:
+        transactions_left: Set[bytes32] = {tx.name for tx in transactions}
+        with anyio.fail_after(delay=adjusted_timeout(timeout)):
+            for backoff in backoff_times():
+                transactions_left = transactions_left & {
+                    tx.name for tx in await wallet_state_manager.tx_store.get_all_unconfirmed()
+                }
+                if len(transactions_left) == 0:
+                    break
+
+                # at least one wallet has unconfirmed transactions
+                await asyncio.sleep(backoff)  # pragma: no cover
+
     async def create_coins_with_amounts(
         self,
         amounts: List[uint64],
@@ -598,10 +629,10 @@ class FullNodeSimulator(FullNodeAPI):
             if len(amounts) == 0:
                 return set()
 
-            outputs: List[AmountWithPuzzlehash] = []
+            outputs: List[Payment] = []
             for amount in amounts:
                 puzzle_hash = await wallet.get_new_puzzlehash()
-                outputs.append({"puzzlehash": puzzle_hash, "amount": uint64(amount), "memos": []})
+                outputs.append(Payment(puzzle_hash, amount))
 
             transaction_records: List[TransactionRecord] = []
             outputs_iterator = iter(outputs)
@@ -612,9 +643,10 @@ class FullNodeSimulator(FullNodeAPI):
 
                 if len(outputs_group) > 0:
                     async with wallet.wallet_state_manager.lock:
-                        tx = await wallet.generate_signed_transaction(
-                            amount=outputs_group[0]["amount"],
-                            puzzle_hash=outputs_group[0]["puzzlehash"],
+                        [tx] = await wallet.generate_signed_transaction(
+                            amount=outputs_group[0].amount,
+                            puzzle_hash=outputs_group[0].puzzle_hash,
+                            tx_config=DEFAULT_TX_CONFIG,
                             primaries=outputs_group[1:],
                         )
                     await wallet.push_transaction(tx=tx)
@@ -625,7 +657,7 @@ class FullNodeSimulator(FullNodeAPI):
             await self.process_transaction_records(records=transaction_records, timeout=None)
 
             output_coins = {coin for transaction_record in transaction_records for coin in transaction_record.additions}
-            puzzle_hashes = {output["puzzlehash"] for output in outputs}
+            puzzle_hashes = {output.puzzle_hash for output in outputs}
             change_coins = {coin for coin in output_coins if coin.puzzle_hash not in puzzle_hashes}
             coins_to_receive = output_coins - change_coins
             await wait_for_coins_in_wallet(coins=coins_to_receive, wallet=wallet)

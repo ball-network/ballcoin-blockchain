@@ -22,13 +22,12 @@ if [ ! "$BALL_INSTALLER_VERSION" ]; then
 	echo "WARNING: No environment variable BALL_INSTALLER_VERSION set. Using 0.0.0."
 	BALL_INSTALLER_VERSION="0.0.0"
 fi
-echo "Ball Installer Version is: $BALL_INSTALLER_VERSION"
+echo "BallCoin Installer Version is: $BALL_INSTALLER_VERSION"
 export BALL_INSTALLER_VERSION
 
 echo "Installing npm and electron packagers"
 cd npm_linux || exit 1
 npm ci
-PATH=$(npm bin):$PATH
 cd .. || exit 1
 
 echo "Create dist/"
@@ -36,13 +35,19 @@ rm -rf dist
 mkdir dist
 
 echo "Create executables with pyinstaller"
-SPEC_FILE=$(python -c 'import ball; print(ball.PYINSTALLER_SPEC_PATH)')
+SPEC_FILE=$(python -c 'import sys; from pathlib import Path; path = Path(sys.argv[1]); print(path.absolute().as_posix())' "pyinstaller.spec")
 pyinstaller --log-level=INFO "$SPEC_FILE"
 LAST_EXIT_CODE=$?
 if [ "$LAST_EXIT_CODE" -ne 0 ]; then
 	echo >&2 "pyinstaller failed!"
 	exit $LAST_EXIT_CODE
 fi
+
+# Creates a directory of licenses
+echo "Building pip and NPM license directory"
+pwd
+bash ./build_license_directory.sh
+
 
 # Builds CLI only .deb
 # need j2 for templating the control file
@@ -51,8 +56,11 @@ CLI_DEB_BASE="ballcoin-blockchain-cli_$BALL_INSTALLER_VERSION-1_$PLATFORM"
 mkdir -p "dist/$CLI_DEB_BASE/opt/ball"
 mkdir -p "dist/$CLI_DEB_BASE/usr/bin"
 mkdir -p "dist/$CLI_DEB_BASE/DEBIAN"
+mkdir -p "dist/$CLI_DEB_BASE/etc/systemd/system"
 j2 -o "dist/$CLI_DEB_BASE/DEBIAN/control" assets/deb/control.j2
+cp assets/systemd/*.service "dist/$CLI_DEB_BASE/etc/systemd/system/"
 cp -r dist/daemon/* "dist/$CLI_DEB_BASE/opt/ball/"
+
 ln -s ../../opt/ball/ball "dist/$CLI_DEB_BASE/usr/bin/ball"
 dpkg-deb --build --root-owner-group "dist/$CLI_DEB_BASE"
 # CLI only .deb done
@@ -82,11 +90,11 @@ if [ "$PLATFORM" = "arm64" ]; then
   # @TODO Once ruby 2.6 can be installed on `apt install ruby`, installing public_suffix below should be removed.
   sudo gem install public_suffix -v 4.0.7
   sudo gem install fpm
-  echo USE_SYSTEM_FPM=true electron-builder build --linux deb --arm64 \
+  echo USE_SYSTEM_FPM=true npx electron-builder build --linux deb --arm64 \
     --config.extraMetadata.name=ballcoin-blockchain \
     --config.productName="$PRODUCT_NAME" --config.linux.desktop.Name="BallCoin Blockchain" \
     --config.deb.packageName="ballcoin-blockchain"
-  USE_SYSTEM_FPM=true electron-builder build --linux deb --arm64 \
+  USE_SYSTEM_FPM=true npx electron-builder build --linux deb --arm64 \
     --config.extraMetadata.name=ballcoin-blockchain \
     --config.productName="$PRODUCT_NAME" --config.linux.desktop.Name="BallCoin Blockchain" \
     --config.deb.packageName="ballcoin-blockchain"
@@ -96,7 +104,7 @@ else
     --config.extraMetadata.name=ballcoin-blockchain \
     --config.productName="$PRODUCT_NAME" --config.linux.desktop.Name="BallCoin Blockchain" \
     --config.deb.packageName="ballcoin-blockchain"
-  electron-builder build --linux deb --x64 \
+  npx electron-builder build --linux deb --x64 \
     --config.extraMetadata.name=ballcoin-blockchain \
     --config.productName="$PRODUCT_NAME" --config.linux.desktop.Name="BallCoin Blockchain" \
     --config.deb.packageName="ballcoin-blockchain"

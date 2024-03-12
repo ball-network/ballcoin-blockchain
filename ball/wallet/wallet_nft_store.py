@@ -46,18 +46,16 @@ class WalletNftStore:
         self.db_wrapper = db_wrapper
         async with self.db_wrapper.writer_maybe_transaction() as conn:
             await conn.execute(
-                (
-                    "CREATE TABLE IF NOT EXISTS users_nfts("
-                    " nft_id text PRIMARY KEY,"
-                    " nft_coin_id text,"
-                    " wallet_id int,"
-                    " did_id text,"
-                    " coin text,"
-                    " lineage_proof text,"
-                    " mint_height bigint,"
-                    " status text,"
-                    " full_puzzle blob)"
-                )
+                "CREATE TABLE IF NOT EXISTS users_nfts("
+                " nft_id text PRIMARY KEY,"
+                " nft_coin_id text,"
+                " wallet_id int,"
+                " did_id text,"
+                " coin text,"
+                " lineage_proof text,"
+                " mint_height bigint,"
+                " status text,"
+                " full_puzzle blob)"
             )
             await conn.execute("CREATE INDEX IF NOT EXISTS nft_coin_id on users_nfts(nft_coin_id)")
             await conn.execute("CREATE INDEX IF NOT EXISTS nft_wallet_id on users_nfts(wallet_id)")
@@ -272,3 +270,8 @@ class WalletNftStore:
             if result.rowcount > 0:
                 return True
             return False
+
+    async def delete_wallet(self, wallet_id: uint32) -> None:
+        async with self.db_wrapper.writer_maybe_transaction() as conn:
+            cursor = await conn.execute("DELETE FROM users_nfts WHERE wallet_id=?", (wallet_id,))
+            await cursor.close()

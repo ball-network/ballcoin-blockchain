@@ -9,6 +9,7 @@ from ball.types.blockchain_format.sized_bytes import bytes32
 from ball.types.blockchain_format.sub_epoch_summary import SubEpochSummary
 from ball.types.blockchain_format.vdf import VDFInfo, VDFProof
 from ball.types.end_of_slot_bundle import EndOfSubSlotBundle
+from ball.types.stake_record import ProofOfStake
 from ball.util.ints import uint8, uint32, uint64, uint128
 from ball.util.streamable import Streamable, streamable
 
@@ -22,6 +23,7 @@ Note: When changing this file, also change protocol_message_types.py, and the pr
 @dataclass(frozen=True)
 class NewPeakTimelord(Streamable):
     reward_chain_block: RewardChainBlock
+    proof_of_stake: ProofOfStake
     difficulty: uint64
     deficit: uint8
     sub_slot_iters: uint64  # SSi in the slot where NewPeak has been infused
@@ -31,13 +33,13 @@ class NewPeakTimelord(Streamable):
     previous_reward_challenges: List[Tuple[bytes32, uint128]]
     last_challenge_sb_or_eos_total_iters: uint128
     passes_ses_height_but_not_yet_included: bool
-    difficulty_coefficient: str
 
 
 @streamable
 @dataclass(frozen=True)
 class NewUnfinishedBlockTimelord(Streamable):
     reward_chain_block: RewardChainBlockUnfinished  # Reward chain trunk data
+    proof_of_stake: ProofOfStake
     difficulty: uint64
     sub_slot_iters: uint64  # SSi in the slot where block is infused
     foliage: Foliage  # Reward chain foliage data
@@ -45,7 +47,6 @@ class NewUnfinishedBlockTimelord(Streamable):
     # This is the last thing infused in the reward chain before this signage point.
     # The challenge that the SP reward chain VDF is based off of, or in the case of sp index 0, the previous infusion
     rc_prev: bytes32
-    difficulty_coefficient: str  # staking
 
 
 @streamable
@@ -68,7 +69,6 @@ class NewSignagePointVDF(Streamable):
     challenge_chain_sp_proof: VDFProof
     reward_chain_sp_vdf: VDFInfo
     reward_chain_sp_proof: VDFProof
-    timelord_fee_puzzle_hash: bytes32
 
 
 @streamable

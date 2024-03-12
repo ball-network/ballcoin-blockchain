@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from aiohttp import ClientConnectorError, ClientSession
-from blspy import AugSchemeMPL, PrivateKey
+from chia_rs import AugSchemeMPL, PrivateKey
 
 from ball.cmds.init_funcs import check_keys
 from ball.daemon.client import DaemonProxy

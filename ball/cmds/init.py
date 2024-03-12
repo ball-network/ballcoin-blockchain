@@ -3,7 +3,7 @@ from __future__ import annotations
 import click
 
 
-@click.command("init", short_help="Create or migrate the configuration")
+@click.command("init", help="Create or migrate the configuration")
 @click.option(
     "--create-certs",
     "-c",
@@ -42,7 +42,7 @@ def init_cmd(
     - Run `ball init -c [directory]` on your remote harvester,
       where [directory] is the the copy of your Farming Machine CA directory
     - Get more details on remote harvester on Ball wiki:
-      https://github.com/Ball-Network/ballcoin-blockchain/wiki/Farming-on-many-machines
+      https://github.com/Chia-Network/chia-blockchain/wiki/Farming-on-many-machines
     """
     from pathlib import Path
 

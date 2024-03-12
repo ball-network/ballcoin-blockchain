@@ -9,6 +9,7 @@ from ball.types.blockchain_format.serialized_program import SerializedProgram
 from ball.types.blockchain_format.sized_bytes import bytes32
 from ball.types.blockchain_format.vdf import VDFProof
 from ball.types.end_of_slot_bundle import EndOfSubSlotBundle
+from ball.types.stake_record import ProofOfStake
 from ball.util.ints import uint32, uint128
 from ball.util.streamable import Streamable, streamable
 
@@ -19,6 +20,7 @@ class UnfinishedBlock(Streamable):
     # Full block, without the final VDFs
     finished_sub_slots: List[EndOfSubSlotBundle]  # If first sb
     reward_chain_block: RewardChainBlockUnfinished  # Reward chain trunk data
+    proof_of_stake: ProofOfStake  # proof of stake
     challenge_chain_sp_proof: Optional[VDFProof]  # If not first sp in sub-slot
     reward_chain_sp_proof: Optional[VDFProof]  # If not first sp in sub-slot
     foliage: Foliage  # Reward chain foliage data

@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from ball.protocols.wallet_protocol import CoinState
+from chia_rs import CoinState
+
 from ball.types.blockchain_format.coin import Coin
 from ball.types.blockchain_format.sized_bytes import bytes32
 from ball.util.ints import uint32, uint64

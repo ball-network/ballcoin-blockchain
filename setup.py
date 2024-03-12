@@ -3,39 +3,38 @@ from __future__ import annotations
 import os
 import sys
 
-from setuptools import setup
+from setuptools import find_packages, setup
 
 dependencies = [
-    "aiofiles==23.1.0",  # Async IO for files
-    "anyio==3.6.2",
-    "boto3==1.26.111",  # AWS S3 for DL s3 plugin
-    "blspy==1.0.16",  # Signature library
-    "chiavdf==1.0.8",  # timelord and vdf verification
-    "chiabip158==1.2",  # bip158-style wallet filters
-    "chiapos==1.0.11",  # proof of space
-    "clvm==0.9.7",
-    "clvm_tools==0.4.6",  # Currying, Program.to, other conveniences
-    "chia_rs==0.2.7",
-    "clvm-tools-rs==0.1.30",  # Rust implementation of clvm_tools' compiler
-    "aiohttp==3.8.4",  # HTTP server for full node rpc
-    "aiosqlite==0.17.0",  # asyncio wrapper for sqlite, to store blocks
-    "bitstring==4.0.1",  # Binary data management library
+    "aiofiles==23.2.1",  # Async IO for files
+    "anyio==4.0.0",
+    "boto3==1.29.4",  # AWS S3 for DL s3 plugin
+    "chiavdf==1.1.0",  # timelord and vdf verification
+    "chiabip158==1.3",  # bip158-style wallet filters
+    "chiapos==2.0.3",  # proof of space
+    "clvm==0.9.8",
+    "clvm_tools==0.4.7",  # Currying, Program.to, other conveniences
+    "chia_rs==0.2.15",
+    "clvm-tools-rs==0.1.39",  # Rust implementation of clvm_tools' compiler
+    "aiohttp==3.9.1",  # HTTP server for full node rpc
+    "aiosqlite==0.19.0",  # asyncio wrapper for sqlite, to store blocks
+    "bitstring==4.1.2",  # Binary data management library
     "colorama==0.4.6",  # Colorizes terminal output
     "colorlog==6.7.0",  # Adds color to logs
-    "concurrent-log-handler==0.9.20",  # Concurrently log and rotate logs
-    "cryptography==39.0.1",  # Python cryptography library for TLS - keyring conflict
-    "filelock==3.9.0",  # For reading and writing config multiprocess and multithread safely  (non-reentrant locks)
-    "keyring==23.13.1",  # Store keys in MacOS Keychain, Windows Credential Locker
-    "PyYAML==6.0",  # Used for config file format
-    "setproctitle==1.3.2",  # Gives the ball processes readable names
+    "concurrent-log-handler==0.9.24",  # Concurrently log and rotate logs
+    "cryptography==41.0.5",  # Python cryptography library for TLS - keyring conflict
+    "filelock==3.13.1",  # For reading and writing config multiprocess and multithread safely  (non-reentrant locks)
+    "keyring==24.3.0",  # Store keys in MacOS Keychain, Windows Credential Locker
+    "PyYAML==6.0.1",  # Used for config file format
+    "setproctitle==1.3.3",  # Gives the ball processes readable names
     "sortedcontainers==2.4.0",  # For maintaining sorted mempools
     "click==8.1.3",  # For the CLI
-    "dnspython==2.3.0",  # Query DNS seeds
+    "dnspython==2.4.2",  # Query DNS seeds
     "watchdog==2.2.0",  # Filesystem event watching - watches keyring.yaml
     "dnslib==0.9.23",  # dns lib
-    "typing-extensions==4.5.0",  # typing backports like Protocol and TypedDict
-    "zstd==1.5.4.0",
-    "packaging==23.0",
+    "typing-extensions==4.8.0",  # typing backports like Protocol and TypedDict
+    "zstd==1.5.5.1",
+    "packaging==23.2",
     "psutil==5.9.4",
 ]
 
@@ -44,30 +43,29 @@ upnp_dependencies = [
 ]
 
 dev_dependencies = [
-    "build",
-    "coverage",
-    "diff-cover",
-    "pre-commit",
-    "py3createtorrent",
-    "pylint",
-    "pytest",
-    "pytest-asyncio>=0.18.1",  # require attribute 'fixture'
-    "pytest-cov",
-    "pytest-monitor; sys_platform == 'linux'",
-    "pytest-xdist",
-    "twine",
-    "isort",
-    "flake8",
-    "mypy",
-    "black==23.3.0",
-    "aiohttp_cors",  # For blackd
-    "ipython",  # For asyncio debugging
-    "pyinstaller==5.8.0",
-    "types-aiofiles",
-    "types-cryptography",
-    "types-pkg_resources",
-    "types-pyyaml",
-    "types-setuptools",
+    "build==1.0.3",
+    "coverage==7.3.2",
+    "diff-cover==8.0.1",
+    "pre-commit==3.5.0",
+    "py3createtorrent==1.1.0",
+    "pylint==3.0.2",
+    "pytest==7.4.3",
+    "pytest-cov==4.1.0",
+    "pytest-mock==3.12.0",
+    "pytest-xdist==3.5.0",
+    "pyupgrade==3.15.0",
+    "twine==4.0.2",
+    "isort==5.12.0",
+    "flake8==6.1.0",
+    "mypy==1.7.0",
+    "black==23.11.0",
+    "lxml==4.9.3",
+    "aiohttp_cors==0.7.0",  # For blackd
+    "pyinstaller==5.13.0",
+    "types-aiofiles==23.2.0.0",
+    "types-cryptography==3.3.23.2",
+    "types-pyyaml==6.0.12.12",
+    "types-setuptools==68.2.0.1",
 ]
 
 legacy_keyring_dependencies = [
@@ -77,54 +75,19 @@ legacy_keyring_dependencies = [
 kwargs = dict(
     name="ballcoin-blockchain",
     author="Mariano Sorgente",
-    author_email="mariano@ballcoin.top",
-    description="BallCoin Blockchain full node, farmer, timelord, and wallet.",
-    url="https://ballcoin.top/",
+    author_email="mariano@ballcoin.vip",
+    description="BallCoin blockchain full node, farmer, timelord, and wallet.",
+    url="https://ballcoin.vip/",
     license="Apache License",
-    python_requires=">=3.7, <4",
-    keywords="BallCoin Blockchain node",
+    python_requires=">=3.8.1, <4",
+    keywords="ballcoin blockchain node",
     install_requires=dependencies,
     extras_require=dict(
         dev=dev_dependencies,
         upnp=upnp_dependencies,
         legacy_keyring=legacy_keyring_dependencies,
     ),
-    packages=[
-        "build_scripts",
-        "ball",
-        "ball.cmds",
-        "ball.clvm",
-        "ball.consensus",
-        "ball.daemon",
-        "ball.data_layer",
-        "ball.full_node",
-        "ball.timelord",
-        "ball.farmer",
-        "ball.harvester",
-        "ball.introducer",
-        "ball.plot_sync",
-        "ball.plotters",
-        "ball.plotting",
-        "ball.pools",
-        "ball.protocols",
-        "ball.rpc",
-        "ball.seeder",
-        "ball.server",
-        "ball.simulator",
-        "ball.types.blockchain_format",
-        "ball.types",
-        "ball.util",
-        "ball.wallet",
-        "ball.wallet.db_wallet",
-        "ball.wallet.puzzles",
-        "ball.wallet.cat_wallet",
-        "ball.wallet.did_wallet",
-        "ball.wallet.nft_wallet",
-        "ball.wallet.trading",
-        "ball.wallet.util",
-        "ball.ssl",
-        "mozilla-ca",
-    ],
+    packages=find_packages(include=["build_scripts", "ball", "ball.*", "mozilla-ca"]),
     entry_points={
         "console_scripts": [
             "ball = ball.cmds.ball:main",
@@ -145,18 +108,17 @@ kwargs = dict(
         ]
     },
     package_data={
-        "ball": ["pyinstaller.spec"],
         "": ["*.clsp", "*.clsp.hex", "*.clvm", "*.clib", "py.typed"],
         "ball.util": ["initial-*.yaml", "english.txt"],
         "ball.ssl": ["ball_ca.crt", "ball_ca.key", "dst_root_ca.pem"],
         "mozilla-ca": ["cacert.pem"],
     },
-    long_description=open("README.md").read(),
+    long_description=open("README.md", encoding="UTF-8").read(),
     long_description_content_type="text/markdown",
     zip_safe=False,
     project_urls={
-        "Source": "https://github.com/Ball-Network/ballcoin-blockchain/",
-        "Changelog": "https://github.com/Ball-Network/ballcoin-blockchain/blob/main/CHANGELOG.md",
+        "Source": "https://github.com/ball-network/ballcoin-blockchain/",
+        "Changelog": "https://github.com/Chia-Network/chia-blockchain/blob/main/CHANGELOG.md",
     },
 )
 

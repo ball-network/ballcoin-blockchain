@@ -8,17 +8,21 @@ import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from decimal import Decimal
-from secrets import token_bytes
-from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, Any
 
-from blspy import AugSchemeMPL, G1Element, G2Element
+from chia_rs import AugSchemeMPL, G1Element, G2Element
 from chiabip158 import PyBIP158
 
 from ball.consensus.block_creation import create_unfinished_block
 from ball.consensus.block_record import BlockRecord
+from ball.consensus.block_rewards import STAKE_FORK_HEIGHT
+from ball.consensus.blockchain import BlockchainMutexPriority
 from ball.consensus.pot_iterations import calculate_ip_iters, calculate_iterations_quality, calculate_sp_iters
-from ball.full_node.bundle_tools import best_solution_generator_from_template, simple_solution_generator
+from ball.full_node.bundle_tools import (
+    best_solution_generator_from_template,
+    simple_solution_generator,
+    simple_solution_generator_backrefs,
+)
 from ball.full_node.fee_estimate import FeeEstimate, FeeEstimateGroup, fee_rate_v2_to_v1
 from ball.full_node.fee_estimator_interface import FeeEstimatorInterface
 from ball.full_node.mempool_check_conditions import get_name_puzzle_conditions, get_puzzle_and_solution_for_coin
@@ -61,6 +65,7 @@ from ball.util.hash import std_hash
 from ball.util.ints import uint8, uint32, uint64, uint128
 from ball.util.limited_semaphore import LimitedSemaphoreFullError
 from ball.util.merkle_set import MerkleSet
+from ball.util.prev_transaction_block import get_prev_transaction_block
 
 if TYPE_CHECKING:
     from ball.full_node.full_node import FullNode
@@ -69,10 +74,12 @@ else:
 
 
 class FullNodeAPI:
+    log: logging.Logger
     full_node: FullNode
     executor: ThreadPoolExecutor
 
     def __init__(self, full_node: FullNode) -> None:
+        self.log = logging.getLogger(__name__)
         self.full_node = full_node
         self.executor = ThreadPoolExecutor(max_workers=1)
 
@@ -81,12 +88,7 @@ class FullNodeAPI:
         assert self.full_node.server is not None
         return self.full_node.server
 
-    @property
-    def log(self) -> logging.Logger:
-        return self.full_node.log
-
-    @property
-    def api_ready(self) -> bool:
+    def ready(self) -> bool:
         return self.full_node.initialized
 
     @api_request(peer_required=True, reply_types=[ProtocolMessageTypes.respond_peers])
@@ -213,7 +215,7 @@ class FullNodeAPI:
                     if task_id in full_node.full_node_store.tx_fetch_tasks:
                         full_node.full_node_store.tx_fetch_tasks.pop(task_id)
 
-            task_id: bytes32 = bytes32(token_bytes(32))
+            task_id: bytes32 = bytes32.secret()
             fetch_task = asyncio.create_task(
                 tx_request_and_timeout(self.full_node, transaction.transaction_id, task_id)
             )
@@ -298,9 +300,7 @@ class FullNodeAPI:
         ):
             return self.full_node.full_node_store.serialized_wp_message
         message = make_msg(
-            ProtocolMessageTypes.respond_proof_of_weight, full_node_protocol.RespondProofOfWeight(
-                wp, request.tip
-            )
+            ProtocolMessageTypes.respond_proof_of_weight, full_node_protocol.RespondProofOfWeight(wp, request.tip)
         )
         self.full_node.full_node_store.serialized_wp_message_tip = request.tip
         self.full_node.full_node_store.serialized_wp_message = message
@@ -325,16 +325,14 @@ class FullNodeAPI:
         if block is not None:
             if not request.include_transaction_block and block.transactions_generator is not None:
                 block = dataclasses.replace(block, transactions_generator=None)
-
-            coefficient: Decimal = await self.full_node.blockchain.height_to_coefficient(block)
-
-            return make_msg(ProtocolMessageTypes.respond_block, full_node_protocol.RespondBlock(
-                block, str(coefficient)
-            ))
+            return make_msg(ProtocolMessageTypes.respond_block, full_node_protocol.RespondBlock(block))
         return make_msg(ProtocolMessageTypes.reject_block, RejectBlock(request.height))
 
     @api_request(reply_types=[ProtocolMessageTypes.respond_blocks, ProtocolMessageTypes.reject_blocks])
     async def request_blocks(self, request: full_node_protocol.RequestBlocks) -> Optional[Message]:
+        # note that we treat the request range as *inclusive*, but we check the
+        # size before we bump end_height. So MAX_BLOCK_COUNT_PER_REQUESTS is off
+        # by one
         if (
             request.end_height < request.start_height
             or request.end_height - request.start_height > self.full_node.constants.MAX_BLOCK_COUNT_PER_REQUESTS
@@ -350,29 +348,24 @@ class FullNodeAPI:
 
         if not request.include_transaction_block:
             blocks: List[FullBlock] = []
-            difficulty_coefficients: List[str] = []
             for i in range(request.start_height, request.end_height + 1):
                 header_hash_i: Optional[bytes32] = self.full_node.blockchain.height_to_hash(uint32(i))
                 if header_hash_i is None:
                     reject = RejectBlocks(request.start_height, request.end_height)
                     return make_msg(ProtocolMessageTypes.reject_blocks, reject)
+
                 block: Optional[FullBlock] = await self.full_node.block_store.get_full_block(header_hash_i)
                 if block is None:
                     reject = RejectBlocks(request.start_height, request.end_height)
                     return make_msg(ProtocolMessageTypes.reject_blocks, reject)
                 block = dataclasses.replace(block, transactions_generator=None)
                 blocks.append(block)
-                difficulty_coefficient: Decimal = await self.full_node.blockchain.height_to_coefficient(block)
-                difficulty_coefficients.append(str(difficulty_coefficient))
             msg = make_msg(
                 ProtocolMessageTypes.respond_blocks,
-                full_node_protocol.RespondBlocks(
-                    request.start_height, request.end_height, blocks, difficulty_coefficients
-                ),
+                full_node_protocol.RespondBlocks(request.start_height, request.end_height, blocks),
             )
         else:
             blocks_bytes: List[bytes] = []
-            coefficients_bytes: List[bytes] = []
             for i in range(request.start_height, request.end_height + 1):
                 header_hash_i = self.full_node.blockchain.height_to_hash(uint32(i))
                 if header_hash_i is None:
@@ -381,24 +374,18 @@ class FullNodeAPI:
                 block_bytes: Optional[bytes] = await self.full_node.block_store.get_full_block_bytes(header_hash_i)
                 if block_bytes is None:
                     reject = RejectBlocks(request.start_height, request.end_height)
-                    return make_msg(ProtocolMessageTypes.reject_blocks, reject)
+                    msg = make_msg(ProtocolMessageTypes.reject_blocks, reject)
+                    return msg
 
                 blocks_bytes.append(block_bytes)
-                difficulty_coefficient: Decimal = await self.full_node.blockchain.height_to_coefficient_bytes(
-                    uint32(i), block_bytes
-                )
-                coefficients_bytes.append(bytes(str(difficulty_coefficient), "utf-8"))
 
             respond_blocks_manually_streamed: bytes = (
-                bytes(uint32(request.start_height))
-                + bytes(uint32(request.end_height))
-                + len(blocks_bytes).to_bytes(4, "big", signed=False)
-                + b"".join(blocks_bytes)
+                uint32(request.start_height).stream_to_bytes()
+                + uint32(request.end_height).stream_to_bytes()
+                + uint32(len(blocks_bytes)).stream_to_bytes()
             )
-            respond_blocks_manually_streamed += len(coefficients_bytes).to_bytes(4, "big", signed=False)
-            for coefficient in coefficients_bytes:
-                respond_blocks_manually_streamed += len(coefficient).to_bytes(4, "big", signed=False) + coefficient
-
+            for block_bytes in blocks_bytes:
+                respond_blocks_manually_streamed += block_bytes
             msg = make_msg(ProtocolMessageTypes.respond_blocks, respond_blocks_manually_streamed)
 
         return msg
@@ -610,7 +597,6 @@ class FullNodeAPI:
                     sp.cc_proof,
                     sp.rc_vdf,
                     sp.rc_proof,
-                    sp.timelord_fee_puzzle_hash,
                 )
                 return make_msg(ProtocolMessageTypes.respond_signage_point, full_node_response)
             else:
@@ -658,7 +644,6 @@ class FullNodeAPI:
                     request.challenge_chain_proof,
                     request.reward_chain_vdf,
                     request.reward_chain_proof,
-                    request.timelord_fee_puzzle_hash,
                 ),
             )
 
@@ -749,19 +734,29 @@ class FullNodeAPI:
             # 2. In the same sub-slot as the peak
             # 3. In a future sub-slot that we already know of
 
-            # Checks that the proof of space is valid
-            quality_string: Optional[bytes32] = verify_and_get_quality_string(
-                request.proof_of_space, self.full_node.constants, cc_challenge_hash, request.challenge_chain_sp
-            )
-            assert quality_string is not None and len(quality_string) == 32
-
             # Grab best transactions from Mempool for given tip target
             aggregate_signature: G2Element = G2Element()
             block_generator: Optional[BlockGenerator] = None
             additions: Optional[List[Coin]] = []
             removals: Optional[List[Coin]] = []
-            async with self.full_node._blockchain_lock_high_priority:
+            async with self.full_node.blockchain.priority_mutex.acquire(priority=BlockchainMutexPriority.high):
                 peak: Optional[BlockRecord] = self.full_node.blockchain.get_peak()
+
+                # Checks that the proof of space is valid
+                height: uint32
+                if peak is None:
+                    height = uint32(0)
+                else:
+                    height = peak.height
+                quality_string: Optional[bytes32] = verify_and_get_quality_string(
+                    request.proof_of_space,
+                    self.full_node.constants,
+                    cc_challenge_hash,
+                    request.challenge_chain_sp,
+                    height=height,
+                )
+                assert quality_string is not None and len(quality_string) == 32
+
                 if peak is not None:
                     # Finds the last transaction block before this one
                     curr_l_tb: BlockRecord = peak
@@ -780,16 +775,22 @@ class FullNodeAPI:
                         removals = spend_bundle.removals()
                         self.full_node.log.info(f"Add rem: {len(additions)} {len(removals)}")
                         aggregate_signature = spend_bundle.aggregated_signature
-                        if self.full_node.full_node_store.previous_generator is not None:
-                            self.log.info(
-                                f"Using previous generator for height "
-                                f"{self.full_node.full_node_store.previous_generator}"
-                            )
-                            block_generator = best_solution_generator_from_template(
-                                self.full_node.full_node_store.previous_generator, spend_bundle
-                            )
+                        # when the hard fork activates, block generators are
+                        # allowed to be serialized with the improved CLVM
+                        # serialization format, supporting back-references
+                        if peak.height >= self.full_node.constants.HARD_FORK_HEIGHT:
+                            block_generator = simple_solution_generator_backrefs(spend_bundle)
                         else:
-                            block_generator = simple_solution_generator(spend_bundle)
+                            if self.full_node.full_node_store.previous_generator is not None:
+                                self.log.info(
+                                    f"Using previous generator for height "
+                                    f"{self.full_node.full_node_store.previous_generator}"
+                                )
+                                block_generator = best_solution_generator_from_template(
+                                    self.full_node.full_node_store.previous_generator, spend_bundle
+                                )
+                            else:
+                                block_generator = simple_solution_generator(spend_bundle)
 
             def get_plot_sig(to_sign: bytes32, _extra: G1Element) -> G2Element:
                 if to_sign == request.challenge_chain_sp:
@@ -889,7 +890,7 @@ class FullNodeAPI:
                 request.proof_of_space.size,
                 difficulty,
                 request.challenge_chain_sp,
-                Decimal(request.difficulty_coefficient),
+                request.proof_of_stake.coefficient,
             )
             sp_iters: uint64 = calculate_sp_iters(self.full_node.constants, sub_slot_iters, request.signage_point_index)
             ip_iters: uint64 = calculate_ip_iters(
@@ -910,6 +911,27 @@ class FullNodeAPI:
                     timestamp = uint64(int(curr.timestamp + 1))
 
             self.log.info("Starting to make the unfinished block")
+            stake_farm_records_dict: Optional[Dict[bytes32, Dict[bytes32, int]]] = None
+            stake_lock_records: Optional[Dict[bytes32, int]] = None
+            if peak is not None and peak.height >= STAKE_FORK_HEIGHT and prev_b is not None:
+                res = get_prev_transaction_block(
+                    prev_b, self.full_node.blockchain, uint128(total_iters_pos_slot + sp_iters)
+                )
+                if res[0]:
+                    curr: BlockRecord = prev_b
+                    while not curr.is_transaction_block:
+                        curr = self.full_node.blockchain.block_record(curr.prev_hash)
+                    if curr is not None and curr.is_transaction_block:
+                        stake_farm_records_dict = await (
+                            self.full_node.blockchain.get_stake_farm_records_dict(curr)
+                        )
+                        prev_transaction_block = self.full_node.blockchain.block_record(
+                            self.full_node.blockchain.height_to_hash(curr.prev_transaction_block_height)
+                        )
+                        prev_timestamp = 1 if prev_transaction_block is None else prev_transaction_block.timestamp
+                        stake_lock_records = await (
+                            self.full_node.blockchain.get_stake_lock_records(prev_timestamp, curr.timestamp)
+                        )
             unfinished_block: UnfinishedBlock = create_unfinished_block(
                 self.full_node.constants,
                 total_iters_pos_slot,
@@ -918,6 +940,7 @@ class FullNodeAPI:
                 sp_iters,
                 ip_iters,
                 request.proof_of_space,
+                request.proof_of_stake,
                 cc_challenge_hash,
                 farmer_ph,
                 pool_target,
@@ -931,12 +954,14 @@ class FullNodeAPI:
                 aggregate_signature,
                 additions,
                 removals,
+                stake_farm_records_dict,
+                stake_lock_records,
                 prev_b,
                 finished_sub_slots,
             )
             self.log.info("Made the unfinished block")
             if prev_b is not None:
-                height: uint32 = uint32(prev_b.height + 1)
+                height = uint32(prev_b.height + 1)
             else:
                 height = uint32(0)
             self.full_node.full_node_store.add_candidate_block(quality_string, height, unfinished_block)
@@ -965,6 +990,7 @@ class FullNodeAPI:
                     sp_iters,
                     ip_iters,
                     request.proof_of_space,
+                    request.proof_of_stake,
                     cc_challenge_hash,
                     farmer_ph,
                     pool_target,
@@ -976,6 +1002,8 @@ class FullNodeAPI:
                     b"",
                     None,
                     G2Element(),
+                    None,
+                    None,
                     None,
                     None,
                     prev_b,
@@ -1028,27 +1056,27 @@ class FullNodeAPI:
             return None
 
         # Propagate to ourselves (which validates and does further propagations)
-        try:
-            await self.full_node.add_unfinished_block(new_candidate, None, True)
-        except Exception as e:
-            # If we have an error with this block, try making an empty block
-            self.full_node.log.error(f"Error farming block {e} {new_candidate}")
-            candidate_tuple = self.full_node.full_node_store.get_candidate_block(
-                farmer_request.quality_string, backup=True
-            )
-            if candidate_tuple is not None:
-                height, unfinished_block = candidate_tuple
-                self.full_node.full_node_store.add_candidate_block(
-                    farmer_request.quality_string, height, unfinished_block, False
-                )
-                # All unfinished blocks that we create will have the foliage transaction block and hash
-                assert unfinished_block.foliage.foliage_transaction_block_hash is not None
-                message = farmer_protocol.RequestSignedValues(
-                    farmer_request.quality_string,
-                    unfinished_block.foliage.foliage_block_data.get_hash(),
-                    unfinished_block.foliage.foliage_transaction_block_hash,
-                )
-                await peer.send_message(make_msg(ProtocolMessageTypes.request_signed_values, message))
+        #try:
+        await self.full_node.add_unfinished_block(new_candidate, None, True)
+        # except Exception as e:
+        #     # If we have an error with this block, try making an empty block
+        #     self.full_node.log.error(f"Error farming block {e} {new_candidate}")
+        #     candidate_tuple = self.full_node.full_node_store.get_candidate_block(
+        #         farmer_request.quality_string, backup=True
+        #     )
+        #     if candidate_tuple is not None:
+        #         height, unfinished_block = candidate_tuple
+        #         self.full_node.full_node_store.add_candidate_block(
+        #             farmer_request.quality_string, height, unfinished_block, False
+        #         )
+        #         # All unfinished blocks that we create will have the foliage transaction block and hash
+        #         assert unfinished_block.foliage.foliage_transaction_block_hash is not None
+        #         message = farmer_protocol.RequestSignedValues(
+        #             farmer_request.quality_string,
+        #             unfinished_block.foliage.foliage_block_data.get_hash(),
+        #             unfinished_block.foliage.foliage_transaction_block_hash,
+        #         )
+        #         await peer.send_message(make_msg(ProtocolMessageTypes.request_signed_values, message))
         return None
 
     # TIMELORD PROTOCOL
@@ -1075,7 +1103,6 @@ class FullNodeAPI:
             request.challenge_chain_sp_proof,
             request.reward_chain_sp_vdf,
             request.reward_chain_sp_proof,
-            request.timelord_fee_puzzle_hash,
         )
         await self.respond_signage_point(full_node_message, peer)
 
@@ -1132,16 +1159,15 @@ class FullNodeAPI:
                     self.full_node.constants.MAX_BLOCK_COST_CLVM,
                     mempool_mode=False,
                     height=request.height,
+                    constants=self.full_node.constants,
                 ),
             )
 
             tx_removals, tx_additions = tx_removals_and_additions(npc_result.conds)
-        # staking
-        difficulty_coefficient = await self.full_node.blockchain.height_to_coefficient(block)
         header_block = get_block_header(block, tx_additions, tx_removals)
         msg = make_msg(
             ProtocolMessageTypes.respond_block_header,
-            wallet_protocol.RespondBlockHeader(header_block, str(difficulty_coefficient)),
+            wallet_protocol.RespondBlockHeader(header_block),
         )
         return msg
 
@@ -1280,7 +1306,7 @@ class FullNodeAPI:
         )
         # Waits for the transaction to go into the mempool, times out after 45 seconds.
         status, error = None, None
-        sleep_time = 0.01
+        sleep_time = 0.5
         for i in range(int(45 / sleep_time)):
             await asyncio.sleep(sleep_time)
             for potential_name, potential_status, potential_error in self.full_node.transaction_responses:
@@ -1327,17 +1353,18 @@ class FullNodeAPI:
 
         block_generator: Optional[BlockGenerator] = await self.full_node.blockchain.get_block_generator(block)
         assert block_generator is not None
-        error, puzzle, solution = await asyncio.get_running_loop().run_in_executor(
-            self.executor, get_puzzle_and_solution_for_coin, block_generator, coin_record.coin
-        )
-
-        if error is not None:
+        try:
+            spend_info = await asyncio.get_running_loop().run_in_executor(
+                self.executor,
+                get_puzzle_and_solution_for_coin,
+                block_generator,
+                coin_record.coin,
+                height,
+                self.full_node.constants,
+            )
+        except ValueError:
             return reject_msg
-
-        assert puzzle is not None
-        assert solution is not None
-
-        wrapper = PuzzleSolutionResponse(coin_name, height, puzzle, solution)
+        wrapper = PuzzleSolutionResponse(coin_name, height, spend_info.puzzle, spend_info.solution)
         response = wallet_protocol.RespondPuzzleSolution(wrapper)
         response_msg = make_msg(ProtocolMessageTypes.respond_puzzle_solution, response)
         return response_msg
@@ -1381,9 +1408,9 @@ class FullNodeAPI:
         # we start building RespondBlockHeaders response (start_height, end_height)
         # and then need to define size of list object
         respond_header_blocks_manually_streamed: bytes = (
-            bytes(uint32(request.start_height))
-            + bytes(uint32(request.end_height))
-            + len(header_blocks_bytes).to_bytes(4, "big", signed=False)
+            uint32(request.start_height).stream_to_bytes()
+            + uint32(request.end_height).stream_to_bytes()
+            + uint32(len(header_blocks_bytes)).stream_to_bytes()
         )
         # and now stream the whole list in bytes
         respond_header_blocks_manually_streamed += b"".join(header_blocks_bytes)
@@ -1520,7 +1547,7 @@ class FullNodeAPI:
         # before we send the response
 
         # Send all coins with requested puzzle hash that have been created after the specified height
-        states: List[CoinState] = await self.full_node.coin_store.get_coin_states_by_puzzle_hashes(
+        states: Set[CoinState] = await self.full_node.coin_store.get_coin_states_by_puzzle_hashes(
             include_spent_coins=True, puzzle_hashes=puzzle_hashes, min_height=request.min_height, max_items=max_items
         )
         max_items -= len(states)
@@ -1538,11 +1565,11 @@ class FullNodeAPI:
         if len(hint_coin_ids) > 0:
             hint_states = await self.full_node.coin_store.get_coin_states_by_ids(
                 include_spent_coins=True,
-                coin_ids=list(hint_coin_ids),
+                coin_ids=hint_coin_ids,
                 min_height=request.min_height,
                 max_items=len(hint_coin_ids),
             )
-            states.extend(hint_states)
+            states.update(hint_states)
 
         end_time = time.monotonic()
 
@@ -1561,7 +1588,7 @@ class FullNodeAPI:
                 end_time - start_time,
             )
 
-        response = wallet_protocol.RespondToPhUpdates(request.puzzle_hashes, request.min_height, states)
+        response = wallet_protocol.RespondToPhUpdates(request.puzzle_hashes, request.min_height, list(states))
         msg = make_msg(ProtocolMessageTypes.respond_to_ph_update, response)
         return msg
 
@@ -1582,7 +1609,7 @@ class FullNodeAPI:
         self.full_node.subscriptions.add_coin_subscriptions(peer.peer_node_id, request.coin_ids, max_subscriptions)
 
         states: List[CoinState] = await self.full_node.coin_store.get_coin_states_by_ids(
-            include_spent_coins=True, coin_ids=request.coin_ids, min_height=request.min_height, max_items=max_items
+            include_spent_coins=True, coin_ids=set(request.coin_ids), min_height=request.min_height, max_items=max_items
         )
 
         response = wallet_protocol.RespondToCoinUpdates(request.coin_ids, request.min_height, states)
@@ -1656,13 +1683,42 @@ class FullNodeAPI:
     def is_trusted(self, peer: WSBallConnection) -> bool:
         return self.server.is_trusted_peer(peer, self.full_node.config.get("trusted_peers", {}))
 
-    # staking
     @api_request()
-    async def request_stakings(self, request: farmer_protocol.RequestStakings) -> Optional[Message]:
-        stakings: List[Tuple[G1Element, str]] = []
-        for public_key in request.public_keys:
-            difficulty_coefficient = await self.full_node.blockchain.get_farmer_difficulty_coefficient(
-                public_key, None
-            )
-            stakings.append((public_key, str(difficulty_coefficient)))
-        return make_msg(ProtocolMessageTypes.respond_stakings, farmer_protocol.FarmerStakings(stakings=stakings))
+    async def request_stake_coefficients(
+        self, request: farmer_protocol.RequestStakeCoefficients
+    ) -> Optional[Message]:
+        stake_coefficients: List[Tuple[G1Element, uint64]] = []
+        for farmer_public_key in request.farmer_public_keys:
+            coefficient = await self.full_node.blockchain.get_stake_coefficient(request.height, farmer_public_key)
+            stake_coefficients.append((farmer_public_key, coefficient))
+        response = farmer_protocol.FarmerStakeCoefficients(stake_coefficients)
+        return make_msg(ProtocolMessageTypes.respond_stake_coefficients, response)
+
+    @api_request()
+    async def request_stake_farm_count(
+        self, request: wallet_protocol.RequestStakeFarmCount
+    ) -> Optional[Message]:
+        count = await self.full_node.blockchain.get_stake_farm_count(request.stake_puzzle_hash)
+        response = wallet_protocol.RespondStakeFarmCount(count)
+        return make_msg(ProtocolMessageTypes.respond_stake_farm_count, response)
+
+    @api_request()
+    async def request_coin_records_by_puzzle_hash(
+        self, request: wallet_protocol.RequestCoinRecords
+    ) -> Optional[Message]:
+        start_height = request.start_height
+        if request.start_height is None:
+            start_height = uint32(0)
+        end_height = request.end_height
+        if end_height is None:
+            end_height = uint32((2 ** 32) - 1)
+
+        coinRecords: List[CoinRecord] = await self.full_node.coin_store.get_coin_records_by_puzzle_hash_limit(
+            request.include_spent_coins,
+            request.puzzle_hash,
+            request.limit,
+            start_height,
+            end_height,
+        )
+        response = wallet_protocol.RespondCoinRecords(coinRecords)
+        return make_msg(ProtocolMessageTypes.respond_coin_records_by_puzzle_hash, response)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import dataclasses
 from typing import Iterator, List, Optional
 
-from blspy import G2Element
+from chia_rs import G2Element
 
 from ball.types.blockchain_format.coin import Coin, coin_as_list
 from ball.types.blockchain_format.program import INFINITE_COST, Program
@@ -13,18 +13,21 @@ from ball.types.condition_opcodes import ConditionOpcode
 from ball.types.spend_bundle import SpendBundle
 from ball.util.condition_tools import conditions_dict_for_solution
 from ball.wallet.lineage_proof import LineageProof
-from ball.wallet.puzzles.cat_loader import CAT_MOD
+from ball.wallet.puzzles.load_clvm import load_clvm_maybe_recompile
 from ball.wallet.uncurried_puzzle import UncurriedPuzzle
 
 NULL_SIGNATURE = G2Element()
 
 ANYONE_CAN_SPEND_PUZZLE = Program.to(1)  # simply return the conditions
+CAT_MOD = load_clvm_maybe_recompile("cat_v2.clsp", package_or_requirement="ball.wallet.cat_wallet.puzzles")
+CAT_MOD_HASH = CAT_MOD.get_tree_hash()
+CAT_MOD_HASH_HASH: bytes32 = Program.to(CAT_MOD_HASH).get_tree_hash()
 
 
 def empty_program() -> Program:
     # ignoring hint error here for:
-    # https://github.com/Ball-Network/clvm/pull/102
-    # https://github.com/Ball-Network/clvm/pull/106
+    # https://github.com/Chia-Network/clvm/pull/102
+    # https://github.com/Chia-Network/clvm/pull/106
     return Program.to([])  # type: ignore[no-any-return]
 
 
@@ -95,7 +98,7 @@ def next_info_for_spendable_cat(spendable_cat: SpendableCAT) -> Program:
     c = spendable_cat.coin
     list = [c.parent_coin_info, spendable_cat.inner_puzzle.get_tree_hash(), c.amount]
     # ignoring hint error here for:
-    # https://github.com/Ball-Network/clvm/pull/102
+    # https://github.com/Chia-Network/clvm/pull/102
     return Program.to(list)  # type: ignore[no-any-return]
 
 

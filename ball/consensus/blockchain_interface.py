@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-from decimal import Decimal
 from typing import Dict, List, Optional
-
-from blspy import G1Element
-from chia_rs import FullBlock
 
 from ball.consensus.block_record import BlockRecord
 from ball.types.blockchain_format.sized_bytes import bytes32
@@ -45,6 +41,9 @@ class BlockchainInterface:
         # ignoring hinting error until we handle our interfaces more formally
         return  # type: ignore[return-value]
 
+    async def contains_block_from_db(self, header_hash: bytes32) -> bool:
+        return  # type: ignore[return-value]
+
     def remove_block_record(self, header_hash: bytes32) -> None:
         pass
 
@@ -63,6 +62,9 @@ class BlockchainInterface:
 
     async def get_block_records_in_range(self, start: int, stop: int) -> Dict[bytes32, BlockRecord]:
         # ignoring hinting error until we handle our interfaces more formally
+        return  # type: ignore[return-value]
+
+    async def prev_block_hash(self, header_hashes: List[bytes32]) -> List[bytes32]:
         return  # type: ignore[return-value]
 
     async def get_header_blocks_in_range(
@@ -99,12 +101,3 @@ class BlockchainInterface:
     def seen_compact_proofs(self, vdf_info: VDFInfo, height: uint32) -> bool:
         # ignoring hinting error until we handle our interfaces more formally
         return  # type: ignore[return-value]
-
-    # staking
-    async def get_farmer_difficulty_coefficient(
-        self, farmer_public_key: G1Element, height: Optional[uint32] = None
-    ) -> Decimal:
-        raise NotImplementedError("get_farmer_difficulty_coefficient not implemented")
-
-    async def height_to_coefficient(self, block: FullBlock | HeaderBlock) -> Decimal:
-        raise NotImplementedError("height_to_coefficient not implemented")

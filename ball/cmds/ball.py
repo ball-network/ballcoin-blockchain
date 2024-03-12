@@ -9,6 +9,7 @@ from ball import __version__
 from ball.cmds.beta import beta_cmd
 from ball.cmds.completion import completion
 from ball.cmds.configure import configure_cmd
+from ball.cmds.dao import dao_cmd
 from ball.cmds.data import data_cmd
 from ball.cmds.db import db_cmd
 from ball.cmds.dev import dev_cmd
@@ -23,10 +24,10 @@ from ball.cmds.plots import plots_cmd
 from ball.cmds.plotters import plotters_cmd
 from ball.cmds.rpc import rpc_cmd
 from ball.cmds.show import show_cmd
-from ball.cmds.staking import staking_cmd
 from ball.cmds.start import start_cmd
 from ball.cmds.stop import stop_cmd
 from ball.cmds.wallet import wallet_cmd
+from ball.cmds.stake import stake_cmd
 from ball.util.default_root import DEFAULT_KEYS_ROOT_PATH, DEFAULT_ROOT_PATH
 from ball.util.errors import KeychainCurrentPassphraseIsInvalid
 from ball.util.keychain import Keychain, set_keys_root_path
@@ -36,7 +37,7 @@ CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"])
 
 
 @click.group(
-    help=f"\n  Manage BallCoin Blockchain infrastructure ({__version__})\n",
+    help=f"\n  Manage ballcoin blockchain infrastructure ({__version__})\n",
     epilog="Try 'ball start node', 'ball netspace -d 192', or 'ball show -s'",
     context_settings=CONTEXT_SETTINGS,
 )
@@ -63,7 +64,7 @@ def cli(
         set_keys_root_path(Path(keys_root_path))
 
     if passphrase_file is not None:
-        from sys import exit
+        import sys
 
         from ball.cmds.passphrase_funcs import cache_passphrase, read_passphrase_from_file
 
@@ -78,19 +79,19 @@ def cli(
                 print(f'Invalid passphrase found in "{passphrase_file.name}"')
             else:
                 print("Invalid passphrase")
-            exit(1)
+            sys.exit(1)
         except Exception as e:
             print(f"Failed to read passphrase: {e}")
 
     check_ssl(Path(root_path))
 
 
-@cli.command("version", short_help="Show ball version")
+@cli.command("version", help="Show ball version")
 def version_cmd() -> None:
     print(__version__)
 
 
-@cli.command("run_daemon", short_help="Runs ball daemon")
+@cli.command("run_daemon", help="Runs ball daemon")
 @click.option(
     "--wait-for-unlock",
     help="If the keyring is passphrase-protected, the daemon will wait for an unlock command before accessing keys",
@@ -113,7 +114,7 @@ def run_daemon_cmd(ctx: click.Context, wait_for_unlock: bool) -> None:
 cli.add_command(keys_cmd)
 cli.add_command(plots_cmd)
 cli.add_command(wallet_cmd)
-cli.add_command(staking_cmd)
+cli.add_command(stake_cmd)
 cli.add_command(plotnft_cmd)
 cli.add_command(configure_cmd)
 cli.add_command(init_cmd)
@@ -130,6 +131,7 @@ cli.add_command(data_cmd)
 cli.add_command(passphrase_cmd)
 cli.add_command(beta_cmd)
 cli.add_command(completion)
+cli.add_command(dao_cmd)
 cli.add_command(dev_cmd)
 
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from blspy import G1Element
+from chia_rs import G1Element
 
 from ball.types.blockchain_format.coin import Coin
 from ball.types.blockchain_format.sized_bytes import bytes32
@@ -28,6 +28,18 @@ def timelord_parent_id(block_height: uint32, genesis_challenge: bytes32) -> byte
     return bytes32(genesis_challenge[16:] + block_height.to_bytes(16, "big"))
 
 
+def stake_farm_reward_parent_id(block_height: uint32, genesis_challenge: bytes32) -> bytes32:
+    return bytes32(genesis_challenge[8:24] + block_height.to_bytes(16, "big"))
+
+
+def stake_lock_reward_parent_id(block_height: uint32, genesis_challenge: bytes32) -> bytes32:
+    return bytes32(genesis_challenge[12:28] + block_height.to_bytes(16, "big"))
+
+
+def fee_parent_id(block_height: uint32, genesis_challenge: bytes32) -> bytes32:
+    return bytes32(genesis_challenge[14:30] + block_height.to_bytes(16, "big"))
+
+
 def create_pool_coin(block_height: uint32, puzzle_hash: bytes32, reward: uint64, genesis_challenge: bytes32) -> Coin:
     parent_id = pool_parent_id(block_height, genesis_challenge)
     return Coin(parent_id, puzzle_hash, reward)
@@ -38,11 +50,32 @@ def create_farmer_coin(block_height: uint32, puzzle_hash: bytes32, reward: uint6
     return Coin(parent_id, puzzle_hash, reward)
 
 
-def create_community_coin(block_height: uint32, puzzle_hash: bytes32, reward: uint64, genesis_challenge: bytes32) -> Coin:
-    parent_id = community_parent_id(block_height, genesis_challenge)
+def create_fee_coin(block_height: uint32, puzzle_hash: bytes32, reward: uint64, genesis_challenge: bytes32) -> Coin:
+    parent_id = fee_parent_id(block_height, genesis_challenge)
     return Coin(parent_id, puzzle_hash, reward)
+
+
+def create_community_coin(
+    block_height: uint32, puzzle_hash: bytes32, reward: uint64, genesis_challenge: bytes32
+) -> Coin:
+    community_id = community_parent_id(block_height, genesis_challenge)
+    return Coin(community_id, puzzle_hash, reward)
 
 
 def create_timelord_coin(block_height: uint32, puzzle_hash: bytes32, reward: uint64, genesis_challenge: bytes32) -> Coin:
     parent_id = timelord_parent_id(block_height, genesis_challenge)
+    return Coin(parent_id, puzzle_hash, reward)
+
+
+def create_stake_farm_reward_coin(
+    block_height: uint32, puzzle_hash: bytes32, reward: uint64, genesis_challenge: bytes32
+) -> Coin:
+    parent_id = stake_farm_reward_parent_id(block_height, genesis_challenge)
+    return Coin(parent_id, puzzle_hash, reward)
+
+
+def create_stake_lock_reward_coin(
+    block_height: uint32, puzzle_hash: bytes32, reward: uint64, genesis_challenge: bytes32
+) -> Coin:
+    parent_id = stake_lock_reward_parent_id(block_height, genesis_challenge)
     return Coin(parent_id, puzzle_hash, reward)
