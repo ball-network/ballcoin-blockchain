@@ -202,23 +202,13 @@ async def validate_block_body(
                     prev_transaction_block.fees,
                     constants.GENESIS_CHALLENGE,
                 ))
-        else:
-            expected_reward_coins.add(create_farmer_coin(
-                prev_transaction_block_height,
-                prev_transaction_block.farmer_puzzle_hash,
-                uint64(calculate_base_farmer_reward(prev_transaction_block.height) + prev_transaction_block.fees),
-                constants.GENESIS_CHALLENGE,
-            ))
-        # Adds the previous block
-        expected_reward_coins.add(
-            create_community_coin(
-                prev_transaction_block_height,
-                prev_transaction_block.community_puzzle_hash,
-                calculate_community_reward(prev_transaction_block.height),
-                constants.GENESIS_CHALLENGE,
-            )
-        )
-        if prev_transaction_block_height >= STAKE_FORK_HEIGHT:
+            if prev_transaction_block.height % 1000 == 0:
+                expected_reward_coins.add(create_community_coin(
+                    prev_transaction_block.height,
+                    prev_transaction_block.community_puzzle_hash,
+                    calculate_community_reward(prev_transaction_block.height),
+                    constants.GENESIS_CHALLENGE,
+                ))
             stake_records = await get_stake_farm_records(
                 prev_transaction_block.farm_puzzle_hash,
                 prev_transaction_block_height,
@@ -229,15 +219,26 @@ async def validate_block_body(
                     create_stake_farm_rewards(constants, stake_records, prev_transaction_block_height)
                 )
         else:
+            expected_reward_coins.add(create_farmer_coin(
+                prev_transaction_block_height,
+                prev_transaction_block.farmer_puzzle_hash,
+                uint64(calculate_base_farmer_reward(prev_transaction_block.height) + prev_transaction_block.fees),
+                constants.GENESIS_CHALLENGE,
+            ))
+            expected_reward_coins.add(create_community_coin(
+                prev_transaction_block_height,
+                prev_transaction_block.community_puzzle_hash,
+                calculate_community_reward(prev_transaction_block.height),
+                constants.GENESIS_CHALLENGE,
+            ))
             if prev_transaction_block.timelord_puzzle_hash != constants.FEES_PUZZLE_HASH:
-                expected_reward_coins.add(
-                    create_timelord_coin(
-                        prev_transaction_block_height,
-                        prev_transaction_block.timelord_puzzle_hash,
-                        calculate_timelord_fee(prev_transaction_block.height),
-                        constants.GENESIS_CHALLENGE,
-                    )
-                )
+                expected_reward_coins.add(create_timelord_coin(
+                    prev_transaction_block_height,
+                    prev_transaction_block.timelord_puzzle_hash,
+                    calculate_timelord_fee(prev_transaction_block.height),
+                    constants.GENESIS_CHALLENGE,
+                ))
+
         # For the second block in the chain, don't go back further
         if prev_transaction_block.height > 0:
             curr_b = await blocks.get_block_record_from_db(prev_transaction_block.prev_hash)
@@ -261,16 +262,17 @@ async def validate_block_body(
                         constants.GENESIS_CHALLENGE,
                     )
                 )
-                expected_reward_coins.add(
-                    create_community_coin(
-                        curr_b.height,
-                        curr_b.community_puzzle_hash,
-                        calculate_community_reward(curr_b.height),
-                        constants.GENESIS_CHALLENGE,
-                    )
-                )
 
                 if curr_b.height >= STAKE_FORK_HEIGHT:
+                    if curr_b.height % 1000 == 0:
+                        expected_reward_coins.add(
+                            create_community_coin(
+                                curr_b.height,
+                                curr_b.community_puzzle_hash,
+                                calculate_community_reward(curr_b.height),
+                                constants.GENESIS_CHALLENGE,
+                            )
+                        )
                     stake_records = await get_stake_farm_records(
                         curr_b.farm_puzzle_hash,
                         curr_b.height,
@@ -282,6 +284,14 @@ async def validate_block_body(
                         )
 
                 else:
+                    expected_reward_coins.add(
+                        create_community_coin(
+                            curr_b.height,
+                            curr_b.community_puzzle_hash,
+                            calculate_community_reward(curr_b.height),
+                            constants.GENESIS_CHALLENGE,
+                        )
+                    )
                     if curr_b.timelord_puzzle_hash != constants.FEES_PUZZLE_HASH:
                         expected_reward_coins.add(
                             create_timelord_coin(

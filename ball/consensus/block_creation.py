@@ -204,6 +204,15 @@ def create_foliage(
                         uint64(prev_transaction_block.fees),
                         constants.GENESIS_CHALLENGE,
                     ))
+                if prev_transaction_block.height % 1000 == 0:
+                    reward_claims_incorporated.append(
+                        create_community_coin(
+                            prev_transaction_block.height,
+                            prev_transaction_block.community_puzzle_hash,
+                            calculate_community_reward(prev_transaction_block.height),
+                            constants.GENESIS_CHALLENGE,
+                        )
+                    )
                 stake_records = stake_farm_records_dict.get(prev_transaction_block.header_hash)
                 if stake_records is not None and len(stake_records) > 0:
                     reward_claims_incorporated += create_stake_farm_rewards(
@@ -216,22 +225,14 @@ def create_foliage(
                     uint64(calculate_base_farmer_reward(prev_transaction_block.height) + prev_transaction_block.fees),
                     constants.GENESIS_CHALLENGE,
                 ))
-
-            reward_claims_incorporated.append(
-                create_community_coin(
-                    prev_transaction_block.height,
-                    prev_transaction_block.community_puzzle_hash,
-                    calculate_community_reward(prev_transaction_block.height),
-                    constants.GENESIS_CHALLENGE,
-                )
-            )
-            if prev_transaction_block.height >= STAKE_FORK_HEIGHT:
-                stake_records = stake_farm_records_dict.get(prev_transaction_block.header_hash)
-                if stake_records is not None and len(stake_records) > 0:
-                    reward_claims_incorporated += create_stake_farm_rewards(
-                        constants, stake_records, prev_transaction_block.height
+                reward_claims_incorporated.append(
+                    create_community_coin(
+                        prev_transaction_block.height,
+                        prev_transaction_block.community_puzzle_hash,
+                        calculate_community_reward(prev_transaction_block.height),
+                        constants.GENESIS_CHALLENGE,
                     )
-            else:
+                )
                 if prev_transaction_block.timelord_puzzle_hash != constants.FEES_PUZZLE_HASH:
                     reward_claims_incorporated.append(
                         create_timelord_coin(
@@ -241,6 +242,7 @@ def create_foliage(
                             constants.GENESIS_CHALLENGE,
                         )
                     )
+
             if curr.height > 0:
                 curr = blocks.block_record(curr.prev_hash)
                 # Prev block is not genesis
@@ -261,22 +263,30 @@ def create_foliage(
                         constants.GENESIS_CHALLENGE,
                     ))
 
-                    reward_claims_incorporated.append(
-                        create_community_coin(
-                            curr.height,
-                            curr.community_puzzle_hash,
-                            calculate_community_reward(curr.height),
-                            constants.GENESIS_CHALLENGE,
-                        )
-                    )
-
                     if curr.height >= STAKE_FORK_HEIGHT:
+                        if curr.height % 1000 == 0:
+                            reward_claims_incorporated.append(
+                                create_community_coin(
+                                    curr.height,
+                                    curr.community_puzzle_hash,
+                                    calculate_community_reward(curr.height),
+                                    constants.GENESIS_CHALLENGE,
+                                )
+                            )
                         stake_records = stake_farm_records_dict.get(curr.header_hash)
                         if stake_records is not None and len(stake_records) > 0:
                             reward_claims_incorporated += create_stake_farm_rewards(
                                 constants, stake_records, curr.height
                             )
                     else:
+                        reward_claims_incorporated.append(
+                            create_community_coin(
+                                curr.height,
+                                curr.community_puzzle_hash,
+                                calculate_community_reward(curr.height),
+                                constants.GENESIS_CHALLENGE,
+                            )
+                        )
                         if curr.timelord_puzzle_hash != constants.FEES_PUZZLE_HASH:
                             reward_claims_incorporated.append(
                                 create_timelord_coin(

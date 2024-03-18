@@ -62,7 +62,9 @@ def calculate_base_farmer_reward(height: uint32) -> uint64:
 
 
 def calculate_community_reward(height: uint32) -> uint64:
-    return uint64(int((6 / 100) * calculate_reward(height) * MOJO_PER_BALL))
+    if height < STAKE_FORK_HEIGHT:
+        return uint64(int((6 / 100) * calculate_reward(height) * MOJO_PER_BALL))
+    return uint64(int(60 * calculate_reward(height) * MOJO_PER_BALL))
 
 
 def calculate_stake_farm_reward(height: uint32) -> uint64:
