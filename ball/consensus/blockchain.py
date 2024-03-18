@@ -1460,7 +1460,7 @@ class Blockchain(BlockchainInterface):
         return stake_farm_records_dict
 
     async def get_stake_lock_records(
-            self, start: uint64, end: uint64
+            self, height: uint32, start: uint64, end: uint64
     ) -> Optional[Dict[bytes32, int]]:
         stake_records = await self.stake_record_store.get_stake_lock_records_thin(start, end)
         stake_rewards: Dict[bytes32, int] = dict()
@@ -1472,8 +1472,12 @@ class Blockchain(BlockchainInterface):
                 expiration = stake.expiration - value.time_lock
                 if start == expiration or end == expiration:
                     continue
-                least_reward = value.least_reward_amount(stake.amount)
-                amount = 10000 * MOJO_PER_BALL * (value.stake_amount(stake.amount) / stake_amount_total)
+                if height >= STAKE_LOCK_HEIGHT:
+                    least_reward = value.least_reward_amount2(stake.amount)
+                    amount = calculate_stake_lock_reward(value.stake_amount(stake.amount) / stake_amount_total)
+                else:
+                    least_reward = value.least_reward_amount(stake.amount)
+                    amount = 10000 * MOJO_PER_BALL * (value.stake_amount(stake.amount) / stake_amount_total)
                 stake_rewards_sum[stake.stake_puzzle_hash] = stake_rewards_sum.get(
                     stake.stake_puzzle_hash, 0
                 ) + (amount if amount > least_reward else least_reward)

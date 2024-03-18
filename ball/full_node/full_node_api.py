@@ -930,7 +930,9 @@ class FullNodeAPI:
                         )
                         prev_timestamp = 1 if prev_transaction_block is None else prev_transaction_block.timestamp
                         stake_lock_records = await (
-                            self.full_node.blockchain.get_stake_lock_records(prev_timestamp, curr.timestamp)
+                            self.full_node.blockchain.get_stake_lock_records(
+                                prev_transaction_block.height, prev_timestamp, curr.timestamp
+                            )
                         )
             unfinished_block: UnfinishedBlock = create_unfinished_block(
                 self.full_node.constants,

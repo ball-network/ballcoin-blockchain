@@ -6,6 +6,7 @@ from ball.util.ints import uint32, uint64
 # 1 Ball coin = 1,000,000,000,000 = 1 trillion mojo.
 MOJO_PER_BALL = 1000000000000
 STAKE_FORK_HEIGHT = 2000000
+STAKE_LOCK_HEIGHT = 2002500
 OLD_STAKE_FORK_HEIGHT = 2020000
 _reward_per = [
     (100000, 200),
@@ -71,8 +72,8 @@ def calculate_stake_farm_reward(height: uint32) -> uint64:
     return uint64(80 * MOJO_PER_BALL)
 
 
-def calculate_stake_lock_reward(scale: float) -> int:
-    return int(4608*200 * scale * MOJO_PER_BALL)
+def calculate_stake_lock_reward(scale: float) -> float:
+    return 4608*200 * MOJO_PER_BALL * scale
 
 
 def calculate_timelord_fee(height: uint32) -> uint64:

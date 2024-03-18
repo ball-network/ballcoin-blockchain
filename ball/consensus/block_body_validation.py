@@ -106,7 +106,7 @@ async def validate_block_body(
     fork_info: ForkInfo,
     get_block_generator: Callable[[BlockInfo], Awaitable[Optional[BlockGenerator]]],
     get_stake_farm_records: Callable[[bytes32, uint32, uint64], Awaitable[Dict[bytes32, int]]],
-    get_stake_lock_records: Callable[[uint64, uint64], Awaitable[Dict[bytes32, int]]],
+    get_stake_lock_records: Callable[[uint32, uint64, uint64], Awaitable[Dict[bytes32, int]]],
     *,
     validate_signature: bool = True,
 ) -> Tuple[Optional[Err], Optional[NPCResult]]:
@@ -307,6 +307,7 @@ async def validate_block_body(
 
             if height >= STAKE_FORK_HEIGHT:
                 stake_records = await get_stake_lock_records(
+                    curr_b.height,
                     curr_b.timestamp if curr_b.is_transaction_block else 1,
                     prev_transaction_block_timestamp,
                 )
