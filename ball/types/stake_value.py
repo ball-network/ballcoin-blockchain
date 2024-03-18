@@ -31,6 +31,10 @@ class StakeValue(Streamable):
             return 0
         return int(amount) * MOJO_PER_BALL * float(self.coefficient) * float(self.reward_coefficient)
 
+    def least_reward_amount2(self, amount: uint64) -> float:
+        if self.reward_coefficient is None:
+            return 0
+        return int(amount) * MOJO_PER_BALL * float(self.reward_coefficient)
 
 STAKE_FARM_LIST: List[StakeValue] = [
     StakeValue(86400 * 3, "1.0", None),
