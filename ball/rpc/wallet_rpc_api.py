@@ -38,7 +38,7 @@ from ball.types.stake_value import (
     STAKE_FARM_LIST,
     STAKE_FARM_MIN,
     STAKE_FARM_COUNT,
-    STAKE_LOCK_LIST,
+    STAKE_LOCK_LIST2,
     STAKE_LOCK_MIN,
     get_stake_value_time_lock,
 )
@@ -4688,7 +4688,7 @@ class WalletRpcApi:
                 "balance": uint128(balance),
                 "balance_exp": uint128(balance_exp),
                 "stake_reward": uint128(stake_reward),
-                "stake_list": [sl.to_json_dict() for sl in STAKE_LOCK_LIST],
+                "stake_list": [sl.to_json_dict() for sl in STAKE_LOCK_LIST2],
                 "stake_min": STAKE_LOCK_MIN,
             }
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Optional
 
-from ball.consensus.block_rewards import MOJO_PER_BALL
+from ball.consensus.block_rewards import MOJO_PER_BALL, STAKE_LOCK_FIXED_HEIGHT
 from ball.util.ints import uint16, uint64
 from ball.util.streamable import Streamable, streamable
 
