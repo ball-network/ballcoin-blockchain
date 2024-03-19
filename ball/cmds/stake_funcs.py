@@ -11,7 +11,7 @@ from ball.cmds.cmds_util import transaction_status_msg, transaction_submitted_ms
 from ball.cmds.units import units
 from ball.rpc.wallet_rpc_client import WalletRpcClient
 from ball.types.blockchain_format.sized_bytes import bytes32
-from ball.types.stake_value import STAKE_FARM_LIST, STAKE_LOCK_LIST
+from ball.types.stake_value import STAKE_FARM_LIST, STAKE_LOCK_LIST2
 from ball.util.bech32m import encode_puzzle_hash
 from ball.util.config import selected_network_address_prefix
 from ball.util.errors import CliRpcConnectionError
@@ -173,7 +173,7 @@ async def stake_send(
 
     selected_stake_type: int = 0
     is_stake_farm = stake_category == "farm"
-    value_list = STAKE_FARM_LIST if is_stake_farm else STAKE_LOCK_LIST
+    value_list = STAKE_FARM_LIST if is_stake_farm else STAKE_LOCK_LIST2
     if stake_type is not None:
         if stake_type < 0 or stake_type >= len(value_list):
             raise CliRpcConnectionError("Invalid stake type")
