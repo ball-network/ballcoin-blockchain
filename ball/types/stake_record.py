@@ -43,7 +43,6 @@ class StakeRecordThin(Streamable):
     amount: uint64
     stake_type: uint16
     is_stake_farm: bool
-    coefficient: str
     expiration: uint64
 
 

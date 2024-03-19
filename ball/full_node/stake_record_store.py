@@ -8,7 +8,7 @@ import typing_extensions
 
 from ball.types.blockchain_format.sized_bytes import bytes32, bytes48
 from ball.types.stake_record import StakeRecord, StakeRecordThin
-from ball.types.stake_value import STAKE_FARM_COUNT
+from ball.types.stake_value import STAKE_FARM_COUNT, get_stake_lock_coefficient
 from ball.util.db_wrapper import SQLITE_MAX_VARIABLE_NUMBER, DBWrapper2
 from ball.util.ints import uint32, uint64, uint128
 from ball.util.lru_cache import LRUCache
@@ -68,6 +68,16 @@ class StakeRecordStore:
 
             log.info("DB: Creating index stake puzzle_hash")
             await conn.execute("CREATE INDEX IF NOT EXISTS puzzle_hash on stake_record(puzzle_hash)")
+
+            async with conn.execute(
+                "SELECT coin_name, stake_type FROM stake_record WHERE is_stake_farm = 0 AND coefficient>3",
+            ) as cursor:
+                record_list: List[Tuple[str, bytes]] = []
+                for row in await cursor.fetchall():
+                    record_list.append((get_stake_lock_coefficient(row[1]), row[0]))
+                if len(record_list) > 0:
+                    for v in record_list:
+                        await conn.execute("UPDATE stake_record SET coefficient=? WHERE coin_name=?", v)
 
         return self
 
@@ -177,7 +187,7 @@ class StakeRecordStore:
             return stake_list
         async with self.db_wrapper.reader_no_transaction() as conn:
             async with conn.execute(
-                "SELECT stake_puzzle_hash,puzzle_hash,amount,stake_type,coefficient,expiration FROM "
+                "SELECT stake_puzzle_hash,puzzle_hash,amount,stake_type,expiration FROM "
                 "stake_record INDEXED BY stake_puzzle_hash WHERE stake_puzzle_hash=? AND is_stake_farm=1 "
                 "AND confirmed_index<? AND expiration>?", (stake_puzzle_hash, height, timestamp,),
             ) as cursor:
@@ -195,8 +205,7 @@ class StakeRecordStore:
                         uint64(int(row[2])),
                         row[3],
                         True,
-                        float(row[4]),
-                        row[5],
+                        row[4],
                     ))
                 self.stake_farm_cache.put(stake_key, records)
                 return records
@@ -211,7 +220,7 @@ class StakeRecordStore:
 
         async with self.db_wrapper.reader_no_transaction() as conn:
             async with conn.execute(
-                "SELECT stake_puzzle_hash,puzzle_hash,amount,stake_type,coefficient,expiration FROM "
+                "SELECT stake_puzzle_hash,puzzle_hash,amount,stake_type,expiration FROM "
                 "stake_record INDEXED BY stake_expiration WHERE is_stake_farm=0 AND expiration>? "
                 "AND expiration%86400>=? AND expiration%86400<?",
                 (end, start % 86400 + 300, end % 86400 + 300,),
@@ -224,8 +233,7 @@ class StakeRecordStore:
                         uint64(int(row[2])),
                         row[3],
                         False,
-                        float(row[4]),
-                        row[5],
+                        row[4],
                     ))
                 self.stake_lock_cache.put(stake_key, records)
                 return records

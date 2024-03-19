@@ -98,3 +98,9 @@ def get_stake_value(height: uint32, stake_type: uint16, is_stake_farm: bool) -> 
     if 0 <= stake_type < len(value):
         return value[stake_type]
     return StakeValue(0, "0", None)
+
+
+def get_stake_lock_coefficient(stake_type: uint16) -> str:
+    if 0 <= stake_type < len(STAKE_LOCK_LIST2):
+        return STAKE_LOCK_LIST2[stake_type].coefficient
+    return "0"
