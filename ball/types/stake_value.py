@@ -67,9 +67,34 @@ STAKE_LOCK_LIST: List[StakeValue] = [
 ]
 
 
-def get_stake_value(stake_type: uint16, is_stake_farm: bool) -> StakeValue:
-    value = STAKE_FARM_LIST if is_stake_farm else STAKE_LOCK_LIST
+STAKE_LOCK_LIST2: List[StakeValue] = [
+    StakeValue(86400 * 3, "1.0", "0.0002"),
+    StakeValue(86400 * 10, "1.05", "0.00021"),
+    StakeValue(86400 * 30, "1.1", "0.00022"),
+    StakeValue(86400 * 90, "1.2", "0.00024"),
+    StakeValue(86400 * 180, "1.4", "0.00028"),
+    StakeValue(86400 * 365, "1.6", "0.00032"),
+    StakeValue(86400 * 730, "1.8", "0.00036"),
+    StakeValue(86400 * 1095, "2", "0.0004"),
+    StakeValue(86400 * 1825, "2.25", "0.00045"),
+    StakeValue(86400 * 3650, "2.5", "0.0005"),
+    StakeValue(86400 * 5475, "2.6", "0.00052"),
+    StakeValue(86400 * 7300, "2.7", "0.00054"),
+    StakeValue(86400 * 10950, "3", "0.0006"),
+]
 
+
+def get_stake_value_time_lock(stake_type: uint16, is_stake_farm: bool) -> uint64:
+    value = STAKE_FARM_LIST if is_stake_farm else STAKE_LOCK_LIST2
+    if 0 <= stake_type < len(value):
+        return value[stake_type].time_lock
+    return uint64(0)
+
+
+def get_stake_value(height: uint32, stake_type: uint16, is_stake_farm: bool) -> StakeValue:
+    value = STAKE_FARM_LIST if is_stake_farm else (
+        STAKE_LOCK_LIST if height < STAKE_LOCK_FIXED_HEIGHT else STAKE_LOCK_LIST2
+    )
     if 0 <= stake_type < len(value):
         return value[stake_type]
     return StakeValue(0, "0", None)

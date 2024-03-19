@@ -683,7 +683,9 @@ class Blockchain(BlockchainInterface):
                                     coin.amount < STAKE_LOCK_MIN
                             ):
                                 continue
-                            stake_value = get_stake_value(stake_metadata.stake_type, stake_metadata.is_stake_farm)
+                            stake_value = get_stake_value(
+                                fetched_full_block.height, stake_metadata.stake_type, stake_metadata.is_stake_farm
+                            )
                             tx_stake_additions.append(StakeRecord(
                                 coin.name(),
                                 int(coin.amount / MOJO_PER_BALL),
@@ -1378,7 +1380,7 @@ class Blockchain(BlockchainInterface):
         )
 
         stake_amount = sum(
-            get_stake_value(stake.stake_type, stake.is_stake_farm).stake_amount(stake.amount)
+            get_stake_value(height, stake.stake_type, stake.is_stake_farm).stake_amount(stake.amount)
             for stake in stake_records
         )
         if height < OLD_STAKE_FORK_HEIGHT:
@@ -1435,7 +1437,7 @@ class Blockchain(BlockchainInterface):
         for stake in stake_records:
             stake_rewards[stake.puzzle_hash] = stake_rewards.get(
                 stake.puzzle_hash, 0
-            ) + get_stake_value(stake.stake_type, stake.is_stake_farm).stake_amount(stake.amount)
+            ) + get_stake_value(height, stake.stake_type, stake.is_stake_farm).stake_amount(stake.amount)
         return stake_rewards
 
     async def get_stake_farm_records_dict(
@@ -1470,7 +1472,7 @@ class Blockchain(BlockchainInterface):
             stake_amount_total = await self.stake_record_store.get_stake_lock_amount_total(end) * MOJO_PER_BALL
             stake_rewards_sum: Dict[bytes32, float] = dict()
             for stake in stake_records:
-                value = get_stake_value(stake.stake_type, stake.is_stake_farm)
+                value = get_stake_value(height, stake.stake_type, stake.is_stake_farm)
                 expiration = stake.expiration - value.time_lock
                 if start == expiration or end == expiration:
                     continue

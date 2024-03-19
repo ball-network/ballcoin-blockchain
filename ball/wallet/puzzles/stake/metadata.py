@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import IntEnum
 from ball.types.blockchain_format.sized_bytes import bytes32
-from ball.types.stake_value import get_stake_value
+from ball.types.stake_value import get_stake_value_time_lock
 from ball.util.ints import uint16, uint64
 from ball.util.streamable import Streamable, streamable
 
@@ -18,7 +18,7 @@ class StakeMetadata(Streamable):
 
     @property
     def time_lock(self) -> uint64:
-        return get_stake_value(self.stake_type, self.is_stake_farm).time_lock
+        return get_stake_value_time_lock(self.stake_type, self.is_stake_farm)
 
 
 class StakeVersion(IntEnum):

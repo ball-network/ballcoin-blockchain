@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Tuple
 from ball.types.blockchain_format.program import Program
 from ball.types.blockchain_format.sized_bytes import bytes32
 from ball.types.condition_opcodes import ConditionOpcode
-from ball.types.stake_value import get_stake_value
+from ball.types.stake_value import get_stake_value_time_lock
 from ball.util.ints import uint16
 from ball.util.misc import VersionedBlob
 from ball.wallet.payment import Payment
@@ -43,7 +43,7 @@ class StakePuzzleDecorator:
         return (
             self.decorate(inner_puzzle),
             create_stake_merkle_puzzle(
-                get_stake_value(self.stake_type, self.is_stake_farm).time_lock, self.recipient_puzzle_hash
+                get_stake_value_time_lock(self.stake_type, self.is_stake_farm), self.recipient_puzzle_hash
             ).get_tree_hash(),
         )
 

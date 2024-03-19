@@ -40,7 +40,7 @@ from ball.types.stake_value import (
     STAKE_FARM_COUNT,
     STAKE_LOCK_LIST,
     STAKE_LOCK_MIN,
-    get_stake_value,
+    get_stake_value_time_lock,
 )
 from ball.util.bech32m import decode_puzzle_hash, encode_puzzle_hash
 from ball.util.byte_types import hexstr_to_bytes
@@ -4702,7 +4702,7 @@ class WalletRpcApi:
         address = request.get("address", "")
         if await self.service.wallet_state_manager.synced() is False:
             return {"success": False, "error": "Wallet needs to be fully synced before stake transactions"}
-        if get_stake_value(stake_type, is_stake_farm).time_lock == 0:
+        if get_stake_value_time_lock(stake_type, is_stake_farm) == 0:
             return {
                 "success": False,
                 "error": f"stake type error {stake_type}",
