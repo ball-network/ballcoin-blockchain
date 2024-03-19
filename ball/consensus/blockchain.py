@@ -23,6 +23,8 @@ from ball.consensus.block_rewards import (
     MOJO_PER_BALL,
     STAKE_FORK_HEIGHT,
     OLD_STAKE_FORK_HEIGHT,
+    STAKE_LOCK_HEIGHT,
+    calculate_stake_lock_reward,
 )
 from ball.consensus.blockchain_interface import BlockchainInterface
 from ball.consensus.coinbase import create_puzzlehash_for_pk
